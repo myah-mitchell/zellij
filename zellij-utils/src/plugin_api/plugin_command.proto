@@ -223,6 +223,7 @@ enum CommandName {
   ApplyFloatingSwapLayout = 230;
   SetPaneBorderStyle = 231;
   GetNestedSessionKeybinds = 232;
+  SetSelfCollapsed = 233;
 }
 
 message PluginCommand {
@@ -387,11 +388,16 @@ message PluginCommand {
     string apply_floating_swap_layout_payload = 173;
     SetPaneBorderStylePayload set_pane_border_style_payload = 174;
     GetNestedSessionKeybindsPayload get_nested_session_keybinds_payload = 175;
+    SetSelfCollapsedPayload set_self_collapsed_payload = 176;
   }
 }
 
 message GetNestedSessionKeybindsPayload {
   PaneId pane_id = 1;
+}
+
+message SetSelfCollapsedPayload {
+  bool collapsed = 1;
 }
 
 message SetPaneFrameStylePayload {
