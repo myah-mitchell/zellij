@@ -1,0 +1,161 @@
+---
+# Keeps the fork current with zellij-org/zellij, once a day.
+#
+# Two things are mirrored, and neither is allowed to start a release:
+#
+#   main            fast-forwarded to upstream's main, so it stays the exact
+#                   mirror that clean pull requests upstream depend on.
+#   upstream tags   copied to refs/upstream-tags/*, not refs/tags/*. They exist
+#                   only so git-cliff has a previous tag to measure a fork
+#                   release against; release-local.yml fetches them at build
+#                   time. Keeping them out of refs/tags leaves the fork's tag
+#                   list showing fork releases alone, and means no v*.*.* tag
+#                   ever exists here for upstream's release.yml to fire on.
+#
+# Every push below uses GITHUB_TOKEN, and GitHub does not start workflow runs
+# for pushes made with it. That is what keeps a mirrored tag from becoming a
+# published release.
+#
+# main-local is deliberately left alone. Merging main into it is the one step
+# that can conflict, precisely when upstream lands a change the fork already
+# carries, so it stays a decision rather than a 6am job that fails until
+# someone intervenes. The summary says when it has fallen behind.
+name: Sync upstream
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # fast-forward main, create mirrored tag refs
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every branch, so main can be compared and pushed
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/zellij-org/zellij.git
+          git fetch --quiet --tags upstream
+
+      # A fast-forward is the only acceptable outcome. Anything else means a
+      # commit reached main that upstream does not have, which breaks the
+      # guarantee that a work branch cut from main carries only its own change.
+      - name: Fast-forward main
+        id: main
+        run: |
+          set -euo pipefail
+          before="$(git rev-parse origin/main)"
+          after="$(git rev-parse upstream/main)"
+
+          if [[ "${before}" == "${after}" ]]; then
+            echo "::notice::main is already at ${after:0:7}."
+            echo "moved=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "${before}" "${after}"; then
+            echo "::error::origin/main (${before:0:7}) is not an ancestor of upstream/main (${after:0:7}), so this is not a fast-forward. Something has been committed to main that upstream does not have; move it to main-local and reset main to upstream/main."
+            exit 1
+          fi
+
+          git push origin "${after}:refs/heads/main"
+          echo "::notice::main ${before:0:7} -> ${after:0:7}"
+          echo "moved=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "before=${before}"
+            echo "after=${after}"
+            echo "count=$(git rev-list --count "${before}..${after}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mirror new upstream tags
+        id: tags
+        run: |
+          set -euo pipefail
+          # sort collates by locale while comm compares bytes, so under a UTF-8
+          # locale comm rejects sort's output as unordered and silently reports
+          # the wrong difference. Pin both to byte order.
+          export LC_ALL=C
+
+          # ls-remote peels refs that point at annotated tag objects, listing
+          # each a second time with a ^{} suffix. Drop those from both sides so
+          # the lists are comparable. awk rather than grep -v, because grep
+          # reports failure when it emits nothing, which is the normal state of
+          # the mirrored list before the first sync has run.
+          git ls-remote --tags upstream \
+            | awk '$2 !~ /\^\{\}$/ { sub(/^refs\/tags\//, "", $2); print $2 }' \
+            | sort > upstream-tags.txt
+
+          git ls-remote origin \
+            | awk '$2 ~ /^refs\/upstream-tags\// && $2 !~ /\^\{\}$/ {
+                     sub(/^refs\/upstream-tags\//, "", $2); print $2 }' \
+            | sort > mirrored-tags.txt
+
+          comm -23 upstream-tags.txt mirrored-tags.txt > new-tags.txt
+          count="$(wc -l < new-tags.txt)"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${count}" -eq 0 ]]; then
+            echo "::notice::No new upstream tags."
+            exit 0
+          fi
+
+          refspecs=()
+          while read -r tag || [[ -n "${tag}" ]]; do
+            refspecs+=("refs/tags/${tag}:refs/upstream-tags/${tag}")
+          done < new-tags.txt
+
+          git push origin "${refspecs[@]}"
+          echo "::notice::Mirrored ${count} new tag(s)."
+          echo "names=$(tr '\n' ' ' < new-tags.txt)" >> "$GITHUB_OUTPUT"
+
+      # main-local is not touched by this job, so whoever reads the run needs to
+      # be told when it has work waiting.
+      - name: Report
+        # Bound through env rather than interpolated into the script. TAG_NAMES
+        # comes from whatever zellij-org has tagged, and `${{ }}` would paste it
+        # into the shell as source text before bash ever sees it.
+        env:
+          MAIN_MOVED: ${{ steps.main.outputs.moved }}
+          MAIN_COUNT: ${{ steps.main.outputs.count }}
+          MAIN_AFTER: ${{ steps.main.outputs.after }}
+          TAG_COUNT: ${{ steps.tags.outputs.count }}
+          TAG_NAMES: ${{ steps.tags.outputs.names }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Upstream sync"
+            echo
+
+            if [[ "${MAIN_MOVED}" == "true" ]]; then
+              echo "- **main**: fast-forwarded ${MAIN_COUNT} commit(s) to \`${MAIN_AFTER:0:7}\`"
+            else
+              echo "- **main**: already current"
+            fi
+
+            if [[ "${TAG_COUNT}" -gt 0 ]]; then
+              echo "- **tags**: mirrored ${TAG_COUNT} new: ${TAG_NAMES}"
+            else
+              echo "- **tags**: none new"
+            fi
+
+            echo
+            if git merge-base --is-ancestor origin/main origin/main-local; then
+              echo "main-local is up to date with main."
+            else
+              behind="$(git rev-list --count origin/main-local..origin/main)"
+              echo "> **main-local is ${behind} commit(s) behind main.**"
+              echo "> Merge when you are ready to reconcile any overlap:"
+              echo '> ```sh'
+              echo '> git switch main-local && git fetch origin'
+              echo '> git merge origin/main'
+              echo '> ```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
