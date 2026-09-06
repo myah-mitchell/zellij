@@ -50,14 +50,38 @@ anything under `.github/workflows/`, and no entry in a `permissions:` block can
 grant that. Zellij edits its own workflow files every few weeks, so those syncs
 fail while every other sync succeeds.
 
-To let them through, create a personal access token with the `workflow` scope
-and add it to this fork as a repository secret named `SYNC_TOKEN`, under
-Settings, Secrets and variables, Actions. The workflow uses it when it is
-present and falls back to the built-in token when it is not.
+A GitHub App installed on this fork can push them. It needs two repository
+permissions: **Contents: write** to move `main` at all, and **Workflows: write**
+for the commits that touch those files. Workflows is a separate permission and
+is off by default, so an app that already syncs fine on ordinary days can still
+fail on these.
 
-Without that secret the sync still works most days. It just stops on the days
+Give the workflow the app by setting two repository secrets under Settings,
+Secrets and variables, Actions:
+
+- `SYNC_APP_ID`, the app's ID
+- `SYNC_APP_PRIVATE_KEY`, the app's private key
+
+With them unset the workflow falls back to the built-in token.
+
+The token minted from the app lasts an hour and is revoked when the job ends,
+which is why an app is preferable to a personal access token here. A fine
+grained personal access token with the same two permissions works if you would
+rather not install an app, but it is tied to a person's account and lives until
+it expires.
+
+Without either, the sync still works most days. It just stops on the days
 upstream touches a workflow, and `main` has to be fast-forwarded by hand that
 once, with the commands under "To sync by hand" below.
+
+Using an app has one visible side effect. GitHub starts no workflow run for a
+push made with the built-in token, but it does for one made with an app token,
+so from then on each sync that moves `main` also starts a run of the inherited
+`rust.yml` against upstream's commits. That is a duplicate of what upstream
+already ran, and it can be turned off by disabling those workflows on this fork
+under Actions. Mirrored tags start nothing either way, because
+`refs/upstream-tags/` is neither a branch nor a tag namespace and no push event
+is raised for it.
 
 `main-local` is deliberately left alone by that job. Merging `main` into it is
 the one step that can conflict, exactly when upstream lands a change the fork
