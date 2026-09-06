@@ -209,17 +209,18 @@ git tag -d fork-v0.1.0
 
 ### Naming a release
 
-The number after `fork-v` is this fork's own, counted independently of
-upstream's versions. It deliberately does not track the upstream version the
-build sits on: a tag like `fork-v0.46.1` would come to mean something false the
-moment upstream released its own 0.46.1. What the build is based on is recorded
-where it cannot go stale, in the commit named on the release page and in the
-range of commits the notes cover.
+The number after `fork-v` is this fork's own series. Bump the patch when the
+fork gains work on the same upstream base, the minor when it picks up a new
+upstream release.
+
+It is not a claim about which upstream version the build contains, even where
+the two numbers happen to look alike, and it will drift from upstream's as soon
+as the fork cuts two builds against one upstream release. What a build is
+actually based on is recorded where it cannot go stale: the commit named on the
+release page, and the range of commits the notes cover.
 
 Any tag starting with `fork-v` triggers the workflow, so the scheme is a
-convention rather than something enforced. A plain increasing series is enough:
-bump the patch for a rebuild on the same upstream base, the minor when the fork
-picks up a new upstream release.
+convention rather than something enforced.
 
 ### Why the tag prefix
 
