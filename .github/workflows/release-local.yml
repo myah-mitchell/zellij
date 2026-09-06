@@ -93,12 +93,19 @@ jobs:
             exit 1
           fi
 
-      # Upstream's tags live under refs/upstream-tags/, where sync-upstream.yml
-      # puts them to keep the fork's tag list to fork releases alone. The
-      # checkout above fetches refs/tags/ only, so without this git-cliff would
-      # see no tag before this one and scope the notes to all of history.
-      - name: Restore upstream tags for the changelog
-        run: git fetch --quiet origin "+refs/upstream-tags/*:refs/tags/*"
+      # A release's notes are scoped by the tag before this one, and for the
+      # first fork build that is an upstream release. Upstream's tags are not
+      # kept in this fork, so that its tag list shows fork releases alone and no
+      # v*.*.* tag ever exists here for the inherited release.yml to fire on.
+      #
+      # Fetch them from upstream directly instead. They live in this runner for
+      # the length of the job and are pushed nowhere, so nothing about the fork
+      # changes and no token is needed: zellij-org/zellij is public.
+      - name: Fetch upstream tags for the changelog
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags https://github.com/zellij-org/zellij.git \
+            "+refs/tags/*:refs/tags/*"
 
       # git-cliff's own `--latest` is not usable here. It takes the second to
       # last entry of a tag list ordered by commit timestamp, but this fork's
@@ -128,7 +135,7 @@ jobs:
             echo "::notice::Release notes cover ${previous}..${current}."
             echo "args=-vv --strip header ${previous}..${current}" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::No earlier tag is reachable from ${current}, so these notes cover the whole history. That is expected for the first fork release only; if it is not the first, the Sync upstream workflow has not run yet and no upstream tags are mirrored."
+            echo "::notice::No earlier tag is reachable from ${current}, so these notes cover the whole history. That is expected for a first fork release cut from a commit no upstream tag precedes. Otherwise the fetch above returned nothing, which is a network or URL problem rather than a state this repository can be in."
             echo "args=-vv --strip header --latest" >> "$GITHUB_OUTPUT"
           fi
 
