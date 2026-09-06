@@ -219,6 +219,7 @@ enum CommandName {
   ToggleFocusNoUiFullscreen = 227;
   FocusHostSession = 228;
   RequestNestedSessionKeybinds = 229;
+  SetSelfCollapsed = 230;
 }
 
 message PluginCommand {
@@ -380,11 +381,16 @@ message PluginCommand {
     SetPaneFrameStylePayload set_pane_frame_style_payload = 170;
     ToggleFloatingPanesPayload toggle_floating_panes_payload = 171;
     RequestNestedSessionKeybindsPayload request_nested_session_keybinds_payload = 172;
+    SetSelfCollapsedPayload set_self_collapsed_payload = 173;
   }
 }
 
 message RequestNestedSessionKeybindsPayload {
   PaneId pane_id = 1;
+}
+
+message SetSelfCollapsedPayload {
+  bool collapsed = 1;
 }
 
 message SetPaneFrameStylePayload {

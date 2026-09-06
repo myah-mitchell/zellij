@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 * feat: report a nested session's input mode and keybindings to its host, so host plugins can show hints for the session the user is actually typing into (https://github.com/zellij-org/zellij/issues/5561)
+* feat: let a plugin give its layout space back while it has nothing to draw, so a bar plugin does not hold an empty row (https://github.com/zellij-org/zellij/issues/5588)
 
 ## [0.45.1] - 2026-08-28
 * fix: nested-session detection over SSH (https://github.com/zellij-org/zellij/pull/5522)
