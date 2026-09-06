@@ -38,6 +38,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # every branch, so main can be compared and pushed
+          # GITHUB_TOKEN is not allowed to push a commit that adds or changes
+          # anything under .github/workflows/, and `permissions:` has no key
+          # that grants it. Upstream edits its own workflow files every few
+          # weeks, so those syncs fail without a personal access token carrying
+          # the workflow scope. Set one as the SYNC_TOKEN secret to let them
+          # through; every other sync works without it.
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
 
       - name: Fetch upstream
         run: |
@@ -66,7 +73,10 @@ jobs:
             exit 1
           fi
 
-          git push origin "${after}:refs/heads/main"
+          if ! git push origin "${after}:refs/heads/main"; then
+            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which GITHUB_TOKEN may not push. Set the SYNC_TOKEN secret to a personal access token with that scope, or fast-forward main by hand this once."
+            exit 1
+          fi
           echo "::notice::main ${before:0:7} -> ${after:0:7}"
           echo "moved=true" >> "$GITHUB_OUTPUT"
           {
@@ -119,6 +129,9 @@ jobs:
       # main-local is not touched by this job, so whoever reads the run needs to
       # be told when it has work waiting.
       - name: Report
+        # Runs even when a step above failed, since a run that stopped early is
+        # exactly when a reader needs to be told what state the fork is in.
+        if: always()
         # Bound through env rather than interpolated into the script. TAG_NAMES
         # comes from whatever zellij-org has tagged, and `${{ }}` would paste it
         # into the shell as source text before bash ever sees it.
@@ -134,20 +147,32 @@ jobs:
             echo "## Upstream sync"
             echo
 
+            # An empty value means the step never set it, which happens when
+            # an earlier step failed. Saying "already current" there would
+            # describe the opposite of what happened.
             if [[ "${MAIN_MOVED}" == "true" ]]; then
               echo "- **main**: fast-forwarded ${MAIN_COUNT} commit(s) to \`${MAIN_AFTER:0:7}\`"
-            else
+            elif [[ "${MAIN_MOVED}" == "false" ]]; then
               echo "- **main**: already current"
+            else
+              echo "- **main**: not synced, the step above did not finish"
             fi
 
-            if [[ "${TAG_COUNT}" -gt 0 ]]; then
+            if [[ -z "${TAG_COUNT}" ]]; then
+              echo "- **tags**: not reached"
+            elif [[ "${TAG_COUNT}" -gt 0 ]]; then
               echo "- **tags**: mirrored ${TAG_COUNT} new: ${TAG_NAMES}"
             else
               echo "- **tags**: none new"
             fi
 
             echo
-            if git merge-base --is-ancestor origin/main origin/main-local; then
+            # Checked before it is used: a summary that stops halfway is worst
+            # exactly when the run has already gone wrong and this is the only
+            # account of it.
+            if ! git rev-parse --verify --quiet refs/remotes/origin/main-local >/dev/null; then
+              echo "main-local is not on the remote yet, so there is nothing to compare."
+            elif git merge-base --is-ancestor origin/main origin/main-local; then
               echo "main-local is up to date with main."
             else
               behind="$(git rev-list --count origin/main-local..origin/main)"

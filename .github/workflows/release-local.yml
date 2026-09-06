@@ -98,16 +98,38 @@ jobs:
       # checkout above fetches refs/tags/ only, so without this git-cliff would
       # see no tag before this one and scope the notes to all of history.
       - name: Restore upstream tags for the changelog
+        run: git fetch --quiet origin "+refs/upstream-tags/*:refs/tags/*"
+
+      # git-cliff's own `--latest` is not usable here. It takes the second to
+      # last entry of a tag list ordered by commit timestamp, but this fork's
+      # tags sit on main-local while upstream's sit on main, so the two
+      # interleave in time rather than following one another along the history.
+      # Once both kinds exist, the tag "before" this one by timestamp can be an
+      # upstream tag older than the previous fork build, and every fork commit
+      # ever made would be listed again as though it were new.
+      #
+      # Walk the ancestry instead. `git describe` answers the question actually
+      # being asked: the nearest tag this commit descends from. Prefer the
+      # previous fork release, since what a reader wants is what changed since
+      # the build they already have, and fall back to the newest upstream tag
+      # for the first release, when there is no earlier fork build to compare to.
+      - name: Work out which commits are new
+        id: range
         run: |
           set -euo pipefail
-          git fetch --quiet origin "+refs/upstream-tags/*:refs/tags/*"
+          current="${GITHUB_REF#refs/tags/}"
 
-          # Nothing is mirrored until sync-upstream.yml has run at least once,
-          # and the fetch above succeeds quietly when there is nothing to fetch.
-          # Say so, rather than leaving a reader to wonder why the notes below
-          # cover the entire history.
-          if [[ -z "$(git tag --list 'v*')" ]]; then
-            echo "::notice::No upstream tags are mirrored yet, so these notes cover every commit before this tag. Run the Sync upstream workflow once to fix this for future releases."
+          previous="$(git describe --tags --abbrev=0 --match 'fork-v*' "${current}^" 2>/dev/null || true)"
+          if [[ -z "${previous}" ]]; then
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "${current}^" 2>/dev/null || true)"
+          fi
+
+          if [[ -n "${previous}" ]]; then
+            echo "::notice::Release notes cover ${previous}..${current}."
+            echo "args=-vv --strip header ${previous}..${current}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No earlier tag is reachable from ${current}, so these notes cover the whole history. That is expected for the first fork release only; if it is not the first, the Sync upstream workflow has not run yet and no upstream tags are mirrored."
+            echo "args=-vv --strip header --latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Protoc
@@ -141,10 +163,15 @@ jobs:
           tar cvzf zellij-x86_64-unknown-linux-musl.tar.gz \
             -C target/x86_64-unknown-linux-musl/release zellij
 
+      # Covers the tarball, under its bare name, so a reader who has downloaded
+      # both files can run `sha256sum -c` in the directory they landed in.
+      # Upstream instead hashes the unpacked binary at its full build path,
+      # which names a file the reader does not have at a path that does not
+      # exist on their machine.
       - name: Create checksum
         run: |
           set -euo pipefail
-          sha256sum target/x86_64-unknown-linux-musl/release/zellij \
+          sha256sum zellij-x86_64-unknown-linux-musl.tar.gz \
             > zellij-x86_64-unknown-linux-musl.sha256sum
 
       - name: Generate a changelog
@@ -157,7 +184,7 @@ jobs:
           # Pinned so that bumping the action's SHA cannot quietly change which
           # commits a release's notes cover.
           version: "v2.14.1"
-          args: -vv --latest --strip header
+          args: ${{ steps.range.outputs.args }}
         env:
           OUTPUT: CHANGES.md
 
