@@ -209,14 +209,19 @@ git tag -d fork-v0.1.0
 
 ### Naming a release
 
-The number after `fork-v` is this fork's own series. Bump the patch when the
-fork gains work on the same upstream base, the minor when it picks up a new
-upstream release.
+The `major.minor` part follows the workspace version in `Cargo.toml`, which is
+what the binary reports for `zellij --version`. Upstream bumps that ahead of the
+matching release, so it names a version upstream has not tagged yet: while this
+was written the crates said `0.46.0` and upstream's newest tag was `v0.45.1`.
 
-It is not a claim about which upstream version the build contains, even where
-the two numbers happen to look alike, and it will drift from upstream's as soon
-as the fork cuts two builds against one upstream release. What a build is
-actually based on is recorded where it cannot go stale: the commit named on the
+The patch is the fork's own build counter against that base, not upstream's
+patch number. `fork-v0.46.0` and `fork-v0.46.1` are two builds of the same
+`0.46.0` tree carrying different amounts of fork work. When a sync moves the
+workspace version on, the next build takes the new `major.minor` and starts
+counting from zero again.
+
+Reading a version number is never the reliable way to tell what a build
+contains. That is recorded where it cannot go stale: the commit named on the
 release page, and the range of commits the notes cover.
 
 Any tag starting with `fork-v` triggers the workflow, so the scheme is a
