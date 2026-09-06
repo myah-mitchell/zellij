@@ -10,8 +10,10 @@
 # adopts git-cliff, and a collision on a fork-only file is exactly what the
 # branch model in LOCAL-RELEASES.md exists to avoid.
 #
-# The <!-- N --> prefixes are sort keys, not content. They order the sections;
+# The <!-- NN --> prefixes are sort keys, not content. They order the sections;
 # the body template strips them with `striptags` before rendering the heading.
+# They are compared as strings rather than numbers, so every one is two digits:
+# a bare `10` would sort between `1` and `2` and put the catch-all group third.
 
 [changelog]
 # changelog header
@@ -73,20 +75,20 @@ commit_parsers = [
   # Merge commits describe branch plumbing rather than a change to the program.
   # The commits they bring in are listed on their own.
   { message = "^Merge ", skip = true },
-  { message = "^feat", group = "<!-- 0 -->Features" },
-  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
-  { message = "^refactor", group = "<!-- 2 -->Refactor" },
-  { message = "^doc", group = "<!-- 3 -->Documentation" },
-  { message = "^perf", group = "<!-- 4 -->Performance" },
-  { message = "^style", group = "<!-- 5 -->Styling" },
-  { message = "^test", group = "<!-- 6 -->Testing" },
+  { message = "^feat", group = "<!-- 00 -->Features" },
+  { message = "^fix", group = "<!-- 01 -->Bug Fixes" },
+  { message = "^refactor", group = "<!-- 02 -->Refactor" },
+  { message = "^doc", group = "<!-- 03 -->Documentation" },
+  { message = "^perf", group = "<!-- 04 -->Performance" },
+  { message = "^style", group = "<!-- 05 -->Styling" },
+  { message = "^test", group = "<!-- 06 -->Testing" },
   { message = "^chore\\(release\\): prepare for", skip = true },
   { message = "^chore\\(deps.*\\)", skip = true },
   { message = "^chore\\(pr\\)", skip = true },
   { message = "^chore\\(pull\\)", skip = true },
-  { message = "^chore|ci", group = "<!-- 7 -->Miscellaneous Tasks" },
-  { body = ".*security", group = "<!-- 8 -->Security" },
-  { message = "^revert", group = "<!-- 9 -->Revert" },
+  { message = "^chore|^ci", group = "<!-- 07 -->Miscellaneous Tasks" },
+  { body = ".*security", group = "<!-- 08 -->Security" },
+  { message = "^revert", group = "<!-- 09 -->Revert" },
   # Everything left over, which is how upstream's non-conventional commits
   # reach the notes. Must stay last: parsers are tried in order.
   { message = ".*", group = "<!-- 10 -->Other" },
