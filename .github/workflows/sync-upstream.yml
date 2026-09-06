@@ -12,9 +12,12 @@
 #                   list showing fork releases alone, and means no v*.*.* tag
 #                   ever exists here for upstream's release.yml to fire on.
 #
-# Every push below uses GITHUB_TOKEN, and GitHub does not start workflow runs
-# for pushes made with it. That is what keeps a mirrored tag from becoming a
-# published release.
+# A mirrored tag never becomes a published release, whichever token pushes it.
+# refs/upstream-tags/ is neither a branch nor a tag namespace, and GitHub raises
+# a push event for refs/heads/ and refs/tags/ alone, so nothing here is a
+# trigger for any workflow. The built-in token does not start runs at all; an
+# app token does, but only for the push to main, which starts the inherited
+# rust.yml against upstream's own commits.
 #
 # main-local is deliberately left alone. Merging main into it is the one step
 # that can conflict, precisely when upstream lands a change the fork already
@@ -33,18 +36,39 @@ jobs:
   sync:
     name: sync
     runs-on: ubuntu-latest
+    # Bound here so the step below can test whether the app is configured. A
+    # step's `if` cannot read `secrets`, but it can read `env`, and env is where
+    # a secret becomes visible to one. It has to be on the job rather than on
+    # the step, because a step's own env is not in place yet when its `if` runs.
+    env:
+      SYNC_APP_ID: ${{ secrets.SYNC_APP_ID }}
     steps:
+      # GITHUB_TOKEN is not allowed to push a commit that adds or changes
+      # anything under .github/workflows/, and `permissions:` has no key that
+      # grants it. Upstream edits its own workflow files every few weeks, so
+      # those syncs fail on the built-in token alone.
+      #
+      # A GitHub App installed on this fork with Contents: write and
+      # Workflows: write can push them. Set SYNC_APP_ID and SYNC_APP_PRIVATE_KEY
+      # as secrets to use one. The token this mints lasts an hour and is revoked
+      # when the job ends.
+      #
+      # With the secrets unset the step is skipped, its output is empty, and the
+      # checkout below falls back to the built-in token, which is right on every
+      # day upstream leaves its workflow files alone.
+      - name: Mint an app token
+        id: app-token
+        if: env.SYNC_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.SYNC_APP_ID }}
+          private-key: ${{ secrets.SYNC_APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # every branch, so main can be compared and pushed
-          # GITHUB_TOKEN is not allowed to push a commit that adds or changes
-          # anything under .github/workflows/, and `permissions:` has no key
-          # that grants it. Upstream edits its own workflow files every few
-          # weeks, so those syncs fail without a personal access token carrying
-          # the workflow scope. Set one as the SYNC_TOKEN secret to let them
-          # through; every other sync works without it.
-          token: ${{ secrets.SYNC_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Fetch upstream
         run: |
@@ -74,7 +98,7 @@ jobs:
           fi
 
           if ! git push origin "${after}:refs/heads/main"; then
-            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which GITHUB_TOKEN may not push. Set the SYNC_TOKEN secret to a personal access token with that scope, or fast-forward main by hand this once."
+            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which the built-in token may not push. Install an app on this fork with Contents: write and Workflows: write and set SYNC_APP_ID and SYNC_APP_PRIVATE_KEY, or fast-forward main by hand this once."
             exit 1
           fi
           echo "::notice::main ${before:0:7} -> ${after:0:7}"
