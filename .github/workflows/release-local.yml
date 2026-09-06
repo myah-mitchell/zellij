@@ -118,8 +118,16 @@ jobs:
       # Walk the ancestry instead. `git describe` answers the question actually
       # being asked: the nearest tag this commit descends from. Prefer the
       # previous fork release, since what a reader wants is what changed since
-      # the build they already have, and fall back to the newest upstream tag
-      # for the first release, when there is no earlier fork build to compare to.
+      # the build they already have, and fall back to an upstream tag for the
+      # first release, when there is no earlier fork build to compare to.
+      #
+      # That fallback tag is the nearest upstream one in this history, which is
+      # not always the newest upstream release: zellij cuts its `chore(release)`
+      # commit on a release branch rather than on main, so a released version's
+      # tag is usually not an ancestor of anything here. The first fork build
+      # therefore reaches back to the last tag that is, and lists rather more
+      # than one release's worth of upstream work. It affects that build alone,
+      # since every later one is scoped by the fork tag before it.
       - name: Work out which commits are new
         id: range
         run: |
