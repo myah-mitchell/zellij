@@ -1,23 +1,22 @@
 ---
-# Keeps the fork current with zellij-org/zellij, once a day.
+# Fast-forwards this fork's main to zellij-org/zellij, once a day, and does
+# nothing else. Keeping main byte-identical to upstream is what makes a pull
+# request from a branch cut off it show only the change it proposes.
 #
-# Two things are mirrored, and neither is allowed to start a release:
+# Upstream's tags are deliberately not copied here. A fork release's notes need
+# the tag before them to know which commits are new, and for the first release
+# that is an upstream tag, but release-local.yml fetches those from upstream
+# when it builds, into the runner and nowhere else. Nothing is stored, so this
+# fork's tag list shows its own releases alone and no v*.*.* tag ever exists
+# here for the inherited release.yml to fire on.
 #
-#   main            fast-forwarded to upstream's main, so it stays the exact
-#                   mirror that clean pull requests upstream depend on.
-#   upstream tags   copied to refs/upstream-tags/*, not refs/tags/*. They exist
-#                   only so git-cliff has a previous tag to measure a fork
-#                   release against; release-local.yml fetches them at build
-#                   time. Keeping them out of refs/tags leaves the fork's tag
-#                   list showing fork releases alone, and means no v*.*.* tag
-#                   ever exists here for upstream's release.yml to fire on.
+# Storing them was the original design and it does not work: a push is refused
+# for want of the workflow permission when the commits it carries contain
+# anything under .github/workflows/, whatever ref namespace it targets, and
+# upstream has had workflow files since v0.5.1.
 #
-# A mirrored tag never becomes a published release, whichever token pushes it.
-# refs/upstream-tags/ is neither a branch nor a tag namespace, and GitHub raises
-# a push event for refs/heads/ and refs/tags/ alone, so nothing here is a
-# trigger for any workflow. The built-in token does not start runs at all; an
-# app token does, but only for the push to main, which starts the inherited
-# rust.yml against upstream's own commits.
+# An app token, unlike the built-in one, does start workflow runs, so a sync
+# that moves main also starts the inherited rust.yml against upstream's commits.
 #
 # main-local is deliberately left alone. Merging main into it is the one step
 # that can conflict, precisely when upstream lands a change the fork already
@@ -30,7 +29,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # fast-forward main, create mirrored tag refs
+  contents: write # fast-forward main
 
 jobs:
   sync:
@@ -74,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           git remote add upstream https://github.com/zellij-org/zellij.git
-          git fetch --quiet --tags upstream
+          git fetch --quiet --no-tags upstream
 
       # A fast-forward is the only acceptable outcome. Anything else means a
       # commit reached main that upstream does not have, which breaks the
@@ -109,62 +108,19 @@ jobs:
             echo "count=$(git rev-list --count "${before}..${after}")"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Mirror new upstream tags
-        id: tags
-        run: |
-          set -euo pipefail
-          # sort collates by locale while comm compares bytes, so under a UTF-8
-          # locale comm rejects sort's output as unordered and silently reports
-          # the wrong difference. Pin both to byte order.
-          export LC_ALL=C
-
-          # ls-remote peels refs that point at annotated tag objects, listing
-          # each a second time with a ^{} suffix. Drop those from both sides so
-          # the lists are comparable. awk rather than grep -v, because grep
-          # reports failure when it emits nothing, which is the normal state of
-          # the mirrored list before the first sync has run.
-          git ls-remote --tags upstream \
-            | awk '$2 !~ /\^\{\}$/ { sub(/^refs\/tags\//, "", $2); print $2 }' \
-            | sort > upstream-tags.txt
-
-          git ls-remote origin \
-            | awk '$2 ~ /^refs\/upstream-tags\// && $2 !~ /\^\{\}$/ {
-                     sub(/^refs\/upstream-tags\//, "", $2); print $2 }' \
-            | sort > mirrored-tags.txt
-
-          comm -23 upstream-tags.txt mirrored-tags.txt > new-tags.txt
-          count="$(wc -l < new-tags.txt)"
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-
-          if [[ "${count}" -eq 0 ]]; then
-            echo "::notice::No new upstream tags."
-            exit 0
-          fi
-
-          refspecs=()
-          while read -r tag || [[ -n "${tag}" ]]; do
-            refspecs+=("refs/tags/${tag}:refs/upstream-tags/${tag}")
-          done < new-tags.txt
-
-          git push origin "${refspecs[@]}"
-          echo "::notice::Mirrored ${count} new tag(s)."
-          echo "names=$(tr '\n' ' ' < new-tags.txt)" >> "$GITHUB_OUTPUT"
-
       # main-local is not touched by this job, so whoever reads the run needs to
       # be told when it has work waiting.
       - name: Report
         # Runs even when a step above failed, since a run that stopped early is
         # exactly when a reader needs to be told what state the fork is in.
         if: always()
-        # Bound through env rather than interpolated into the script. TAG_NAMES
-        # comes from whatever zellij-org has tagged, and `${{ }}` would paste it
-        # into the shell as source text before bash ever sees it.
+        # Bound through env rather than interpolated into the script, so that
+        # nothing a step produced is pasted into the shell as source text before
+        # bash ever sees it.
         env:
           MAIN_MOVED: ${{ steps.main.outputs.moved }}
           MAIN_COUNT: ${{ steps.main.outputs.count }}
           MAIN_AFTER: ${{ steps.main.outputs.after }}
-          TAG_COUNT: ${{ steps.tags.outputs.count }}
-          TAG_NAMES: ${{ steps.tags.outputs.names }}
         run: |
           set -euo pipefail
           {
@@ -180,14 +136,6 @@ jobs:
               echo "- **main**: already current"
             else
               echo "- **main**: not synced, the step above did not finish"
-            fi
-
-            if [[ -z "${TAG_COUNT}" ]]; then
-              echo "- **tags**: not reached"
-            elif [[ "${TAG_COUNT}" -gt 0 ]]; then
-              echo "- **tags**: mirrored ${TAG_COUNT} new: ${TAG_NAMES}"
-            else
-              echo "- **tags**: none new"
             fi
 
             echo

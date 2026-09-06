@@ -34,8 +34,8 @@ upstream/main ──▶ main ──┬──▶ work branch ──▶ PR to zell
 ## Syncing from upstream
 
 `.github/workflows/sync-upstream.yml` runs daily at 06:00 UTC, and on demand
-from the Actions tab. It fast-forwards `main` to `upstream/main` and mirrors any
-new upstream tags. It never forces, so it fails rather than rewriting anything.
+from the Actions tab. It fast-forwards `main` to `upstream/main` and does
+nothing else. It never forces, so it fails rather than rewriting anything.
 A failed run means one of two things, and the run's summary and error say which:
 
 - **The fast-forward was refused.** Something has been committed to `main` that
@@ -79,9 +79,7 @@ push made with the built-in token, but it does for one made with an app token,
 so from then on each sync that moves `main` also starts a run of the inherited
 `rust.yml` against upstream's commits. That is a duplicate of what upstream
 already ran, and it can be turned off by disabling those workflows on this fork
-under Actions. Mirrored tags start nothing either way, because
-`refs/upstream-tags/` is neither a branch nor a tag namespace and no push event
-is raised for it.
+under Actions.
 
 `main-local` is deliberately left alone by that job. Merging `main` into it is
 the one step that can conflict, exactly when upstream lands a change the fork
@@ -108,27 +106,32 @@ git fetch upstream
 git switch main && git merge --ff-only upstream/main
 ```
 
-### Where upstream's tags live
+### Where upstream's tags come from
 
-Upstream's tags are mirrored to `refs/upstream-tags/*`, not `refs/tags/*`. They
-are kept because `git-cliff` needs a previous tag to measure a release's notes
-against, and hiding them from `refs/tags/` buys two things: this fork's tag list
-shows its own releases rather than 76 of upstream's, and no `v*.*.*` tag ever
+This fork keeps none of upstream's tags. Its tag list holds fork releases alone,
+which is what makes the release page readable, and it means no `v*.*.*` tag ever
 exists here for the inherited `release.yml` to fire on.
 
-They are invisible to a normal `git fetch`. To read them:
+They are still needed when a release's notes are written, since the tag before a
+build is what says which commits are new, and for a first fork release that tag
+is an upstream one. The release workflow fetches them from upstream when it
+builds:
 
 ```sh
-git ls-remote origin | grep refs/upstream-tags/     # list them
-git fetch origin "+refs/upstream-tags/*:refs/tags/*"  # fetch as local tags
+git fetch --no-tags https://github.com/zellij-org/zellij.git "+refs/tags/*:refs/tags/*"
 ```
 
-The release workflow does that fetch itself before generating a changelog, so
-nothing needs doing by hand for a release. Nothing is mirrored until the sync
-workflow has run at least once, though, so run it once before cutting the first
-release. Otherwise there is no earlier tag to measure against and the notes
-cover the entire history of the project. The release run says so in a notice
-when it happens.
+They live in that runner for the length of the job and are pushed nowhere.
+zellij-org/zellij is public, so this needs no token and nothing has to be set up
+before the first release. The same command is how you get them into a local
+clone if you want to read the history against them.
+
+Copying them into the fork under a second name was tried first and does not
+work. A push is refused for want of the workflow permission whenever the commits
+it carries contain anything under `.github/workflows/`, whichever ref namespace
+it targets, and upstream has had workflow files since `v0.5.1`, so 74 of its 78
+tags were rejected. Fetching at build time avoids the problem rather than
+demanding a permission for it.
 
 ### When upstream lands something the fork already has
 
@@ -179,8 +182,8 @@ path instead, so the two files are not interchangeable.
 The notes cover the commits since the previous fork release, or since the newest
 upstream release the build descends from when there is no earlier fork build to
 compare against. That range is worked out by walking the history rather than by
-asking `git-cliff` for the latest tag: fork tags and mirrored upstream tags sit
-on branches that diverged, so ordering them by date interleaves them, and a
+asking `git-cliff` for the latest tag: the fork's tags and upstream's sit on
+branches that diverged, so ordering them by date interleaves them, and a
 release would re-list everything the one before it already shipped.
 
 Only that one target is built. Upstream's release covers six targets in both
@@ -226,10 +229,9 @@ competing to publish the same tag. The `fork-v` prefix matches only the local
 release workflow's filter, which leaves upstream's file untouched and free to
 merge cleanly on every sync.
 
-Mirroring upstream's tags out of `refs/tags/` means no `v*.*.*` tag is expected
-to exist on this fork at all, so the prefix is now the second of two defences
-rather than the only one. It still matters: it is what makes tagging one by hand
-harmless.
+Keeping upstream's tags out of this fork means no `v*.*.*` tag is expected to
+exist here at all, so the prefix is the second of two defences rather than the
+only one. It still matters: it is what makes tagging one by hand harmless.
 
 Upstream's `release.yml` can also be started by hand from the Actions tab, where
 it builds every target and opens a draft release named `Release main`. That is
