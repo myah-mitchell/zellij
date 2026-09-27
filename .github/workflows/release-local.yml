@@ -115,26 +115,30 @@ jobs:
       # upstream tag older than the previous fork build, and every fork commit
       # ever made would be listed again as though it were new.
       #
-      # Walk the ancestry instead. `git describe` answers the question actually
-      # being asked: the nearest tag this commit descends from. Prefer the
-      # previous fork release, since what a reader wants is what changed since
-      # the build they already have, and fall back to an upstream tag for the
-      # first release, when there is no earlier fork build to compare to.
+      # Compare against the previous fork release instead, since what a reader
+      # wants is what changed since the build they already have. That is the
+      # fork tag just below this one in version order, not the nearest one in
+      # this commit's ancestry: main-local is rebuilt from main and its branches
+      # whenever that is simpler than merging (see LOCAL-RELEASES.md), and a
+      # rebuilt main-local no longer descends from the builds cut before it.
+      # A range between two unrelated commits still means the right thing to
+      # git-cliff: everything this build has that the previous one did not.
       #
-      # That fallback tag is the nearest upstream one in this history, which is
-      # not always the newest upstream release: zellij cuts its `chore(release)`
-      # commit on a release branch rather than on main, so a released version's
-      # tag is usually not an ancestor of anything here. The first fork build
-      # therefore reaches back to the last tag that is, and lists rather more
-      # than one release's worth of upstream work. It affects that build alone,
-      # since every later one is scoped by the fork tag before it.
+      # The first fork release has no earlier build to compare to, so it falls
+      # back to the nearest upstream tag it descends from. That is not always
+      # the newest upstream release: zellij cuts its `chore(release)` commit on
+      # a release branch rather than on main, so a released version's tag is
+      # usually not an ancestor of anything here. The first fork build therefore
+      # reaches back to the last tag that is, and lists rather more than one
+      # release's worth of upstream work. It affects that build alone.
       - name: Work out which commits are new
         id: range
         run: |
           set -euo pipefail
           current="${GITHUB_REF#refs/tags/}"
 
-          previous="$(git describe --tags --abbrev=0 --match 'fork-v*' "${current}^" 2>/dev/null || true)"
+          previous="$(git tag --list 'fork-v*' --sort=-version:refname \
+            | grep -Fx -A1 "${current}" | sed -n 2p || true)"
           if [[ -z "${previous}" ]]; then
             previous="$(git describe --tags --abbrev=0 --match 'v*' "${current}^" 2>/dev/null || true)"
           fi
