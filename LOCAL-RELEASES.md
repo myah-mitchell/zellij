@@ -12,23 +12,30 @@ commits upstream does not have. The branch layout below keeps them apart.
 ever lands here. Keeping it byte-identical to upstream is what makes a pull
 request from this fork show only the change it proposes.
 
-**`main-local`** is the integration branch. It carries `main` plus every
-fork-only commit: this document, the local release workflow, and any work that
-is finished enough to run but not yet accepted upstream. It is merged *into*,
-never branched *from* for upstream work. Its history is expected to diverge from
-upstream permanently.
+**`fork-tooling`** holds the fork's own files and nothing else: this document,
+the release and sync workflows, and `cliff-fork.toml`. It is branched from
+`main` and never proposed upstream. A change to the fork's tooling is made here,
+then merged into `main-local` like any other branch.
 
 **Work branches** are branched from `main`, one per change you intend to
 propose. Because they start from an exact copy of upstream, the pull request
-they open contains only their own commits. A work branch you also want to run
-locally gets merged into `main-local` as well, which is what puts it into a
-local release without entangling it with the fork's tooling commits.
+they open contains only their own commits.
+
+**`main-local`** is the integration branch, and holds no commits of its own. It
+is `main` with a merge of `fork-tooling` and a merge of each work branch you
+want to run before upstream accepts it. It is merged *into*, never branched
+*from*. Everything on it is a merge, so it can be thrown away and rebuilt from
+its parts at any time (see [Rebuilding main-local](#rebuilding-main-local)).
 
 ```
 upstream/main ──▶ main ──┬──▶ work branch ──▶ PR to zellij-org/zellij
                          │         │
-                         │         └──▶ merged into main-local (to run it)
+                         ├──▶ fork-tooling
+                         │         │
+                         │         ▼
                          └──▶ main-local ──▶ fork-v* tag ──▶ fork release
+                          (main + a merge of fork-tooling
+                           and of each work branch to run)
 ```
 
 ## Syncing from upstream
@@ -39,8 +46,8 @@ nothing else. It never forces, so it fails rather than rewriting anything.
 A failed run means one of two things, and the run's summary and error say which:
 
 - **The fast-forward was refused.** Something has been committed to `main` that
-  upstream does not have. Move it to `main-local`, then reset `main` to
-  `upstream/main`.
+  upstream does not have. Move it to `fork-tooling` or a work branch, then
+  reset `main` to `upstream/main`.
 - **The push was refused for want of the workflow scope.** See below.
 
 ### Letting upstream's workflow changes through
@@ -146,10 +153,32 @@ depends only on whether the two copies produced the same text:
   favour of upstream's version. Staying aligned with upstream is the point of
   the sync, and the fork's copy has served its purpose.
 
-A local commit whose content has landed upstream can then be dropped from
-`main-local` entirely by rebasing the branch onto `main`. This is optional
-housekeeping, worth doing when the same conflict keeps reappearing on later
-syncs.
+When the conflicts are large, which is likely when review reshaped the change,
+skip the merge and rebuild `main-local` without that work branch instead.
+
+### Rebuilding main-local
+
+Because `main-local` is only merges, it can be rebuilt from scratch whenever
+merging `main` into it gets awkward: after a work branch lands upstream in a
+different shape, or when a branch is dropped. Start from `main` and merge back
+in only what should still be there:
+
+```sh
+git fetch origin
+git switch -C main-local origin/main
+git merge --no-ff origin/fork-tooling
+git merge --no-ff origin/feat/some-work-branch   # one per branch still unmerged upstream
+```
+
+A work branch that was written against an older `main` can conflict here, or
+compile cleanly and still be wrong where upstream reshaped the code around it.
+Resolve that in the merge commit and run `cargo xtask test` before pushing. The
+same resolution is what the branch's pull request will need when it is rebased,
+so it is worth noting there.
+
+Pushing the result replaces the branch's history, so it needs
+`git push --force-with-lease origin main-local`. Earlier fork releases keep
+their own history reachable through their tags.
 
 ## Cutting a local release
 
