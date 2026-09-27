@@ -1,0 +1,243 @@
+---
+# Publishes fork builds from `main-local`, the branch that carries this fork's
+# own work on top of upstream. See LOCAL-RELEASES.md for the branch model.
+#
+# The tag prefix is what keeps this separate from upstream's release.yml, which
+# this branch also carries and which fires on `v*.*.*`. A `fork-v0.46.0` tag
+# matches only the filter below, so cutting a fork build never starts an
+# upstream release run alongside it.
+name: Local Release
+on:
+  push:
+    tags:
+      - "fork-v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # A fork build that fails its tests is worse than no build, since it gets
+  # installed unattended from the release page. The release job waits on this.
+  #
+  # Nothing else covers it: zellij's rust.yml and e2e.yml both trigger on
+  # `branches: [main]` only, so neither runs for a tag push or for any commit on
+  # main-local. Tests that decide whether a release is published have to run
+  # inside the workflow that publishes it.
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    # Compiling and testing never needs to write to the repository. Only the
+    # release job below gets a token that can.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Every zellij build compiles protobuf definitions.
+      - name: Install Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # No version or target inputs: rust-toolchain.toml pins the channel and
+      # lists both wasm32-wasip1 and x86_64-unknown-linux-musl, so restating any
+      # of it here would only add somewhere for it to drift. Upstream's own test
+      # job in rust.yml is set up the same way.
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+
+      - name: Run tests
+        run: cargo xtask test
+
+  release:
+    name: release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Fetches every branch and tag, which git-cliff needs for the
+          # changelog and the step below needs to resolve origin/main*.
+          fetch-depth: 0
+
+      # The release notes claim this artifact is a fork build. Two ways to tag
+      # something that is not: a commit that never reached main-local (an
+      # unmerged work branch, or main-local not yet pushed), or a commit on
+      # main, which is a pure mirror of upstream and carries no fork work at
+      # all. Reject both before anything is built or published.
+      - name: Verify the tag carries fork work
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+
+          for ref in origin/main origin/main-local; do
+            git rev-parse --verify --quiet "refs/remotes/${ref}" >/dev/null || {
+              echo "::error::${ref} is missing from this checkout, so ${tag} cannot be verified."
+              exit 1
+            }
+          done
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main-local; then
+            echo "::error::${tag} points at ${GITHUB_SHA}, which is not on origin/main-local. Push main-local first, then push the tag."
+            exit 1
+          fi
+
+          if git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${tag} points at ${GITHUB_SHA}, which is on main and so carries no fork work. Tag a commit on main-local instead."
+            exit 1
+          fi
+
+      # A release's notes are scoped by the tag before this one, and for the
+      # first fork build that is an upstream release. Upstream's tags are not
+      # kept in this fork, so that its tag list shows fork releases alone and no
+      # v*.*.* tag ever exists here for the inherited release.yml to fire on.
+      #
+      # Fetch them from upstream directly instead. They live in this runner for
+      # the length of the job and are pushed nowhere, so nothing about the fork
+      # changes and no token is needed: zellij-org/zellij is public.
+      - name: Fetch upstream tags for the changelog
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags https://github.com/zellij-org/zellij.git \
+            "+refs/tags/*:refs/tags/*"
+
+      # git-cliff's own `--latest` is not usable here. It takes the second to
+      # last entry of a tag list ordered by commit timestamp, but this fork's
+      # tags sit on main-local while upstream's sit on main, so the two
+      # interleave in time rather than following one another along the history.
+      # Once both kinds exist, the tag "before" this one by timestamp can be an
+      # upstream tag older than the previous fork build, and every fork commit
+      # ever made would be listed again as though it were new.
+      #
+      # Compare against the previous fork release instead, since what a reader
+      # wants is what changed since the build they already have. That is the
+      # fork tag just below this one in version order, not the nearest one in
+      # this commit's ancestry: main-local is rebuilt from main and its branches
+      # whenever that is simpler than merging (see LOCAL-RELEASES.md), and a
+      # rebuilt main-local no longer descends from the builds cut before it.
+      # A range between two unrelated commits still means the right thing to
+      # git-cliff: everything this build has that the previous one did not.
+      #
+      # The first fork release has no earlier build to compare to, so it falls
+      # back to the nearest upstream tag it descends from. That is not always
+      # the newest upstream release: zellij cuts its `chore(release)` commit on
+      # a release branch rather than on main, so a released version's tag is
+      # usually not an ancestor of anything here. The first fork build therefore
+      # reaches back to the last tag that is, and lists rather more than one
+      # release's worth of upstream work. It affects that build alone.
+      - name: Work out which commits are new
+        id: range
+        run: |
+          set -euo pipefail
+          current="${GITHUB_REF#refs/tags/}"
+
+          previous="$(git tag --list 'fork-v*' --sort=-version:refname \
+            | grep -Fx -A1 "${current}" | sed -n 2p || true)"
+          if [[ -z "${previous}" ]]; then
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "${current}^" 2>/dev/null || true)"
+          fi
+
+          if [[ -n "${previous}" ]]; then
+            echo "::notice::Release notes cover ${previous}..${current}."
+            echo "args=-vv --strip header ${previous}..${current}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No earlier tag is reachable from ${current}, so these notes cover the whole history. That is expected for a first fork release cut from a commit no upstream tag precedes. Otherwise the fetch above returned nothing, which is a network or URL problem rather than a state this repository can be in."
+            echo "args=-vv --strip header --latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mirrors upstream's release job. `cross` does the musl link inside a
+      # container, but keeping this here means a fallback to a host build has
+      # what it needs rather than failing halfway through a release.
+      - name: Install musl-tools
+        run: sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+
+      # Builds the wasm plugins natively, then links the binary for musl through
+      # `cross`. This is the same command upstream's release.yml uses for its
+      # own x86_64 musl artifact, web support included.
+      - name: Build release binary
+        run: cargo xtask ci cross x86_64-unknown-linux-musl
+
+      # Named exactly as upstream names its own musl artifact, so this build
+      # drops into anything that already knows how to unpack one. The release
+      # notes are what say where it came from.
+      - name: Create artifact
+        run: |
+          set -euo pipefail
+          tar cvzf zellij-x86_64-unknown-linux-musl.tar.gz \
+            -C target/x86_64-unknown-linux-musl/release zellij
+
+      # Covers the tarball, under its bare name, so a reader who has downloaded
+      # both files can run `sha256sum -c` in the directory they landed in.
+      # Upstream instead hashes the unpacked binary at its full build path,
+      # which names a file the reader does not have at a path that does not
+      # exist on their machine.
+      - name: Create checksum
+        run: |
+          set -euo pipefail
+          sha256sum zellij-x86_64-unknown-linux-musl.tar.gz \
+            > zellij-x86_64-unknown-linux-musl.sha256sum
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
+        id: git-cliff
+        with:
+          # The fork's own config. Zellij writes CHANGELOG.md by hand and ships
+          # no git-cliff config, so there is nothing upstream to inherit here.
+          config: cliff-fork.toml
+          # Pinned so that bumping the action's SHA cannot quietly change which
+          # commits a release's notes cover.
+          version: "v2.14.1"
+          args: ${{ steps.range.outputs.args }}
+        env:
+          OUTPUT: CHANGES.md
+
+      # The release page is the only place a reader sees these artifacts, so it
+      # has to say plainly whose build this is and exactly what went into it.
+      - name: Compose release notes
+        run: |
+          set -euo pipefail
+          {
+            echo "Fork build from \`main-local\`. Not an upstream zellij release."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`${GITHUB_REF#refs/tags/}\` |"
+            echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
+            echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+            echo "| Target | \`x86_64-unknown-linux-musl\` |"
+            echo
+            cat CHANGES.md
+          } > RELEASE_NOTES.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          # Published rather than draft: pushing the tag is meant to be the last
+          # manual step, and these builds are installed straight from the
+          # release page.
+          draft: false
+          prerelease: false
+          files: |
+            zellij-x86_64-unknown-linux-musl.tar.gz
+            zellij-x86_64-unknown-linux-musl.sha256sum
