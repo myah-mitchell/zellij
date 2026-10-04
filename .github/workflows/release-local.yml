@@ -11,7 +11,10 @@
 # or `window-v0.46.0` tag matches only the filters below, so cutting a fork
 # build never starts an upstream release run alongside it.
 #
-# Each release carries a Linux build and a Windows build. Started by hand from
+# Each release carries a static Linux build and a Windows build. A branch with
+# zellij's native window (the `window` cargo feature) also gets a glibc Linux
+# build, since a static musl binary cannot load the display libraries the
+# window needs. Started by hand from
 # the Actions tab instead, the workflow tests and builds whichever branch is
 # picked there and keeps the results as run artifacts, but publishes nothing.
 # That is the way to try a change to this file, or a branch that has not been
@@ -31,15 +34,17 @@ env:
 jobs:
   # Runs first because it is cheap and the rest is not: a tag on the wrong
   # commit should fail in seconds, not after half an hour of tests and builds.
+  # It also decides which targets get built, so it runs on a manual run too,
+  # with the tag checks skipped.
   verify:
     name: verify
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       prefix: ${{ steps.line.outputs.prefix }}
       branch: ${{ steps.line.outputs.branch }}
+      targets: ${{ steps.targets.outputs.matrix }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,6 +57,7 @@ jobs:
       # to the trigger above.
       - name: Work out the release line
         id: line
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
@@ -75,6 +81,7 @@ jobs:
       # main, which is a pure mirror of upstream and carries no fork work at
       # all. Reject both before anything is built or published.
       - name: Verify the tag carries fork work
+        if: github.event_name == 'push'
         env:
           BRANCH: ${{ steps.line.outputs.branch }}
         run: |
@@ -98,6 +105,29 @@ jobs:
             exit 1
           fi
 
+      # Decided by what the commit contains rather than by its tag prefix, so a
+      # manual run of any branch builds what a release of it would. The window
+      # opens through Wayland or X11 libraries it loads at runtime, which a
+      # static musl binary cannot do (it fails with "Dynamic loading not
+      # supported"). So a branch with the window also gets a glibc build,
+      # linked dynamically. It is built on the oldest glibc the runners offer
+      # through ubuntu-latest, and runs on any distribution with that glibc or
+      # newer. The musl build stays for everything else: the terminal zellij,
+      # and machines without a desktop.
+      - name: Choose the targets
+        id: targets
+        run: |
+          set -euo pipefail
+          musl='{"name":"linux-musl","os":"ubuntu-latest","target":"x86_64-unknown-linux-musl","bin":"target/x86_64-unknown-linux-musl/release"}'
+          gnu='{"name":"linux-gnu","os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bin":"target/release"}'
+          windows='{"name":"windows","os":"windows-latest","target":"x86_64-pc-windows-msvc","bin":"target/release"}'
+          if grep -q '^window = ' Cargo.toml; then
+            echo "::notice::This commit has the window feature, so it also gets a glibc build."
+            echo "matrix={\"include\":[${musl},${gnu},${windows}]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix={\"include\":[${musl},${windows}]}" >> "$GITHUB_OUTPUT"
+          fi
+
   # A fork build that fails its tests is worse than no build, since it gets
   # installed unattended from the release page. The builds wait on this.
   #
@@ -114,9 +144,6 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     needs: verify
-    # verify is skipped on a manual run, and a skipped dependency would
-    # otherwise skip this job too.
-    if: ${{ !cancelled() && needs.verify.result != 'failure' }}
     # Compiling and testing never needs to write to the repository. Only the
     # publish job below gets a token that can.
     permissions:
@@ -160,19 +187,11 @@ jobs:
 
   build:
     name: build (${{ matrix.name }})
-    needs: test
-    if: ${{ !cancelled() && needs.test.result == 'success' }}
+    needs: [verify, test]
     permissions:
       contents: read
     strategy:
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - name: windows
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
+      matrix: ${{ fromJSON(needs.verify.outputs.targets) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,7 +205,7 @@ jobs:
       # container, but keeping this here means a fallback to a host build has
       # what it needs rather than failing halfway through a release.
       - name: Install musl-tools
-        if: matrix.name == 'linux'
+        if: matrix.name == 'linux-musl'
         run: sudo apt-get install -y --no-install-recommends musl-tools
 
       # Upstream's Windows release installs this too: one of the dependencies
@@ -204,8 +223,16 @@ jobs:
       # `cross`. This is the same command upstream's release.yml uses for its
       # own x86_64 musl artifact, web support included.
       - name: Build release binary
-        if: matrix.name == 'linux'
+        if: matrix.name == 'linux-musl'
         run: cargo xtask ci cross x86_64-unknown-linux-musl
+
+      # A plain native build on the runner, glibc and dynamically linked, so the
+      # window can load the display libraries of whatever machine it runs on.
+      # Nothing extra is installed for it: the window loads every display
+      # library at runtime rather than linking against it.
+      - name: Build release binary
+        if: matrix.name == 'linux-gnu'
+        run: cargo xtask ci build-release
 
       # Windows cannot be cross-compiled from Linux the way musl is, so it is
       # built natively, with the command and flags upstream's release uses.
@@ -221,19 +248,19 @@ jobs:
       # into anything that already knows how to unpack one. The release notes
       # are what say where they came from.
       - name: Create artifact
-        if: matrix.name == 'linux'
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           mkdir dist
           tar cvzf "dist/zellij-${{ matrix.target }}.tar.gz" \
-            -C "target/${{ matrix.target }}/release" zellij
+            -C "${{ matrix.bin }}" zellij
 
       - name: Create artifact
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path target/release/zellij.exe `
+          Compress-Archive -Path "${{ matrix.bin }}/zellij.exe" `
             -DestinationPath "dist/zellij-${{ matrix.target }}.zip"
 
       # Covers the archive, under its bare name, so a reader who has downloaded
@@ -265,7 +292,7 @@ jobs:
     needs: [verify, build]
     # Only a tag publishes, and only once every build has succeeded, so a
     # release never goes out with one platform missing.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' }}
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
@@ -375,7 +402,7 @@ jobs:
             echo "| Tag | \`${GITHUB_REF#refs/tags/}\` |"
             echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
-            echo "| Targets | \`x86_64-unknown-linux-musl\`, \`x86_64-pc-windows-msvc\` |"
+            echo "| Targets | $(cd dist && ls *.sha256sum | sed 's/^zellij-\(.*\)\.sha256sum$/`\1`/' | paste -sd, - | sed 's/,/, /g') |"
             echo
             cat CHANGES.md
           } > RELEASE_NOTES.md
@@ -394,8 +421,6 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            dist/zellij-x86_64-unknown-linux-musl.tar.gz
-            dist/zellij-x86_64-unknown-linux-musl.sha256sum
-            dist/zellij-x86_64-pc-windows-msvc.zip
-            dist/zellij-x86_64-pc-windows-msvc.sha256sum
+          # Whatever the build job produced, which differs between the lines.
+          # Every one of them is there: this job only runs once all builds pass.
+          files: dist/zellij-*
