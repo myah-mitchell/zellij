@@ -1,0 +1,179 @@
+---
+# Fast-forwards this fork's main to zellij-org/zellij, once a day, and does
+# nothing else. Keeping main byte-identical to upstream is what makes a pull
+# request from a branch cut off it show only the change it proposes.
+#
+# Upstream's tags are deliberately not copied here. A fork release's notes need
+# the tag before them to know which commits are new, and for the first release
+# that is an upstream tag, but release-local.yml fetches those from upstream
+# when it builds, into the runner and nowhere else. Nothing is stored, so this
+# fork's tag list shows its own releases alone and no v*.*.* tag ever exists
+# here for the inherited release.yml to fire on.
+#
+# Storing them was the original design and it does not work: a push is refused
+# for want of the workflow permission when the commits it carries contain
+# anything under .github/workflows/, whatever ref namespace it targets, and
+# upstream has had workflow files since v0.5.1.
+#
+# An app token, unlike the built-in one, does start workflow runs, so a sync
+# that moves main also starts the inherited rust.yml against upstream's commits.
+#
+# main-local is deliberately left alone. Merging main into it is the one step
+# that can conflict, precisely when upstream lands a change the fork already
+# carries, so it stays a decision rather than a 6am job that fails until
+# someone intervenes. The summary says when it has fallen behind.
+name: Sync upstream
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # fast-forward main
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    # Bound here so the step below can test whether the app is configured. A
+    # step's `if` cannot read `secrets`, but it can read `env`, and env is where
+    # a secret becomes visible to one. It has to be on the job rather than on
+    # the step, because a step's own env is not in place yet when its `if` runs.
+    env:
+      SYNC_APP_ID: ${{ secrets.SYNC_APP_ID }}
+    steps:
+      # GITHUB_TOKEN is not allowed to push a commit that adds or changes
+      # anything under .github/workflows/, and `permissions:` has no key that
+      # grants it. Upstream edits its own workflow files every few weeks, so
+      # those syncs fail on the built-in token alone.
+      #
+      # A GitHub App installed on this fork with Contents: write and
+      # Workflows: write can push them. Set SYNC_APP_ID and SYNC_APP_PRIVATE_KEY
+      # as secrets to use one. The token this mints lasts an hour and is revoked
+      # when the job ends.
+      #
+      # With the secrets unset the step is skipped, its output is empty, and the
+      # checkout below falls back to the built-in token, which is right on every
+      # day upstream leaves its workflow files alone.
+      - name: Mint an app token
+        id: app-token
+        if: env.SYNC_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.SYNC_APP_ID }}
+          private-key: ${{ secrets.SYNC_APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every branch, so main can be compared and pushed
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/zellij-org/zellij.git
+          git fetch --quiet --no-tags upstream
+
+      # A fast-forward is the only acceptable outcome. Anything else means a
+      # commit reached main that upstream does not have, which breaks the
+      # guarantee that a work branch cut from main carries only its own change.
+      - name: Fast-forward main
+        id: main
+        run: |
+          set -euo pipefail
+          before="$(git rev-parse origin/main)"
+          after="$(git rev-parse upstream/main)"
+
+          if [[ "${before}" == "${after}" ]]; then
+            echo "::notice::main is already at ${after:0:7}."
+            echo "moved=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "${before}" "${after}"; then
+            echo "::error::origin/main (${before:0:7}) is not an ancestor of upstream/main (${after:0:7}), so this is not a fast-forward. Something has been committed to main that upstream does not have; move it to main-local and reset main to upstream/main."
+            exit 1
+          fi
+
+          if ! git push origin "${after}:refs/heads/main"; then
+            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which the built-in token may not push. Install an app on this fork with Contents: write and Workflows: write and set SYNC_APP_ID and SYNC_APP_PRIVATE_KEY, or fast-forward main by hand this once."
+            exit 1
+          fi
+          echo "::notice::main ${before:0:7} -> ${after:0:7}"
+          echo "moved=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "before=${before}"
+            echo "after=${after}"
+            echo "count=$(git rev-list --count "${before}..${after}")"
+          } >> "$GITHUB_OUTPUT"
+
+      # main-local is not touched by this job, so whoever reads the run needs to
+      # be told when it has work waiting.
+      - name: Report
+        # Runs even when a step above failed, since a run that stopped early is
+        # exactly when a reader needs to be told what state the fork is in.
+        if: always()
+        # Bound through env rather than interpolated into the script, so that
+        # nothing a step produced is pasted into the shell as source text before
+        # bash ever sees it.
+        env:
+          MAIN_MOVED: ${{ steps.main.outputs.moved }}
+          MAIN_COUNT: ${{ steps.main.outputs.count }}
+          MAIN_AFTER: ${{ steps.main.outputs.after }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Upstream sync"
+            echo
+
+            # An empty value means the step never set it, which happens when
+            # an earlier step failed. Saying "already current" there would
+            # describe the opposite of what happened.
+            if [[ "${MAIN_MOVED}" == "true" ]]; then
+              echo "- **main**: fast-forwarded ${MAIN_COUNT} commit(s) to \`${MAIN_AFTER:0:7}\`"
+            elif [[ "${MAIN_MOVED}" == "false" ]]; then
+              echo "- **main**: already current"
+            else
+              echo "- **main**: not synced, the step above did not finish"
+            fi
+
+            echo
+            # Checked before it is used: a summary that stops halfway is worst
+            # exactly when the run has already gone wrong and this is the only
+            # account of it.
+            if ! git rev-parse --verify --quiet refs/remotes/origin/main-local >/dev/null; then
+              echo "main-local is not on the remote yet, so there is nothing to compare."
+            elif git merge-base --is-ancestor origin/main origin/main-local; then
+              echo "main-local is up to date with main."
+            else
+              behind="$(git rev-list --count origin/main-local..origin/main)"
+              echo "> **main-local is ${behind} commit(s) behind main.**"
+              echo "> Merge when you are ready to reconcile any overlap:"
+              echo '> ```sh'
+              echo '> git switch main-local && git fetch origin'
+              echo '> git merge origin/main'
+              echo '> ```'
+            fi
+
+            # main-window follows upstream's zellij-window branch rather than
+            # main, and like main-local it is only reported on, never merged.
+            # The branch goes away upstream once its pull request lands, which
+            # is the point to fold main-window back into main-local.
+            echo
+            if ! git rev-parse --verify --quiet refs/remotes/origin/main-window >/dev/null; then
+              echo "main-window is not on the remote yet, so there is nothing to compare."
+            elif ! git rev-parse --verify --quiet refs/remotes/upstream/zellij-window >/dev/null; then
+              echo "> **upstream no longer has a zellij-window branch.** If it was merged, main-window can be retired in favour of main-local."
+            elif git merge-base --is-ancestor upstream/zellij-window origin/main-window; then
+              echo "main-window is up to date with upstream's zellij-window."
+            else
+              behind="$(git rev-list --count origin/main-window..upstream/zellij-window)"
+              echo "> **main-window is ${behind} commit(s) behind upstream's zellij-window.**"
+              echo "> Merge when you are ready:"
+              echo '> ```sh'
+              echo '> git switch main-window && git fetch upstream'
+              echo '> git merge upstream/zellij-window'
+              echo '> ```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
