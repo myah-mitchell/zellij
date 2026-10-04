@@ -155,4 +155,25 @@ jobs:
               echo '> git merge origin/main'
               echo '> ```'
             fi
+
+            # main-window follows upstream's zellij-window branch rather than
+            # main, and like main-local it is only reported on, never merged.
+            # The branch goes away upstream once its pull request lands, which
+            # is the point to fold main-window back into main-local.
+            echo
+            if ! git rev-parse --verify --quiet refs/remotes/origin/main-window >/dev/null; then
+              echo "main-window is not on the remote yet, so there is nothing to compare."
+            elif ! git rev-parse --verify --quiet refs/remotes/upstream/zellij-window >/dev/null; then
+              echo "> **upstream no longer has a zellij-window branch.** If it was merged, main-window can be retired in favour of main-local."
+            elif git merge-base --is-ancestor upstream/zellij-window origin/main-window; then
+              echo "main-window is up to date with upstream's zellij-window."
+            else
+              behind="$(git rev-list --count origin/main-window..upstream/zellij-window)"
+              echo "> **main-window is ${behind} commit(s) behind upstream's zellij-window.**"
+              echo "> Merge when you are ready:"
+              echo '> ```sh'
+              echo '> git switch main-window && git fetch upstream'
+              echo '> git merge upstream/zellij-window'
+              echo '> ```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

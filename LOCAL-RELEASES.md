@@ -38,6 +38,26 @@ upstream/main ──▶ main ──┬──▶ work branch ──▶ PR to zell
                            and of each work branch to run)
 ```
 
+**`main-window`** is a second integration branch, built the same way as
+`main-local` but on upstream's `zellij-window` branch
+([zellij-org/zellij#5652](https://github.com/zellij-org/zellij/pull/5652), the
+native window frontend) instead of on `main`. It exists to run that branch
+before upstream merges it, together with this fork's work. It is
+`upstream/zellij-window` with a merge of `fork-tooling` and a merge of each
+work branch to run, and it is released from `window-v*` tags.
+
+```
+upstream/zellij-window ──▶ main-window ──▶ window-v* tag ──▶ window release
+                    (+ a merge of fork-tooling
+                     and of each work branch to run)
+```
+
+Work branches are still branched from `main`, so merging one into
+`main-window` also brings in whatever `main` has that `zellij-window` does not
+yet. That is where conflicts come from, and they are resolved in the merge
+commit as with `main-local`. Once upstream merges `zellij-window`, its window
+work arrives in `main` and `main-local`, and `main-window` can be retired.
+
 ## Syncing from upstream
 
 `.github/workflows/sync-upstream.yml` runs daily at 06:00 UTC, and on demand
@@ -88,11 +108,12 @@ so from then on each sync that moves `main` also starts a run of the inherited
 already ran, and it can be turned off by disabling those workflows on this fork
 under Actions.
 
-`main-local` is deliberately left alone by that job. Merging `main` into it is
+`main-local` and `main-window` are deliberately left alone by that job. Merging `main` into it is
 the one step that can conflict, exactly when upstream lands a change the fork
 already carries, and that is a decision to make rather than something to
 discover from a failed overnight run. Each run's summary says whether
-`main-local` has fallen behind, and the merge is a two-line job:
+`main-local` has fallen behind `main`, and whether `main-window` has fallen
+behind upstream's `zellij-window`. For `main-local` the merge is a two-line job:
 
 ```sh
 git switch main-local && git fetch origin
@@ -156,6 +177,13 @@ depends only on whether the two copies produced the same text:
 When the conflicts are large, which is likely when review reshaped the change,
 skip the merge and rebuild `main-local` without that work branch instead.
 
+For `main-window` it is the same with upstream's branch:
+
+```sh
+git switch main-window && git fetch upstream
+git merge upstream/zellij-window
+```
+
 ### Rebuilding main-local
 
 Because `main-local` is only merges, it can be rebuilt from scratch whenever
@@ -180,10 +208,26 @@ Pushing the result replaces the branch's history, so it needs
 `git push --force-with-lease origin main-local`. Earlier fork releases keep
 their own history reachable through their tags.
 
+`main-window` is rebuilt the same way from upstream's branch:
+
+```sh
+git fetch origin && git fetch upstream
+git switch -C main-window upstream/zellij-window
+git merge --no-ff origin/fork-tooling
+git merge --no-ff origin/feat/some-work-branch
+git push --force-with-lease origin main-window
+```
+
 ## Cutting a local release
 
 Releases are built by `.github/workflows/release-local.yml`, which runs on
-pushed tags matching `fork-v*`.
+pushed tags matching `fork-v*` or `window-v*`. The prefix picks the branch the
+tag must be on:
+
+| Tag | Branch | Built from |
+|---|---|---|
+| `fork-v*` | `main-local` | upstream `main` plus fork work |
+| `window-v*` | `main-window` | upstream `zellij-window` plus fork work |
 
 ```sh
 git switch main-local
@@ -191,6 +235,10 @@ git push origin main-local          # push the branch before the tag
 git tag -a fork-v0.1.0 -m "fork-v0.1.0"
 git push origin fork-v0.1.0
 ```
+
+A `main-window` build is the same with `main-window` and a `window-v` tag.
+Both lines publish the same artifact names, so the tag on the release page is
+what tells them apart.
 
 The workflow runs `cargo xtask test`, and only if that passes builds the
 `x86_64-unknown-linux-musl` binary with `cargo xtask ci cross`, the same command
@@ -208,9 +256,10 @@ The checksum covers the tarball under its bare name, so verifying a download is
 files landed in. Upstream's own releases hash the unpacked binary at its build
 path instead, so the two files are not interchangeable.
 
-The notes cover the commits since the previous fork release, or since the newest
-upstream release the build descends from when there is no earlier fork build to
-compare against. That range is worked out by walking the history rather than by
+The notes cover the commits since the previous release with the same prefix,
+so a `window-v` build is compared with the last `window-v` build and never with
+a `fork-v` one. When there is none, they cover the commits since the newest
+upstream release the build descends from. That range is worked out by walking the history rather than by
 asking `git-cliff` for the latest tag: the fork's tags and upstream's sit on
 branches that diverged, so ordering them by date interleaves them, and a
 release would re-list everything the one before it already shipped.
@@ -222,7 +271,8 @@ the release job a build matrix and uploading the extra file.
 
 Because those notes make a claim about where the code came from, the workflow
 checks the claim before building. It requires the tagged commit to be contained
-in `origin/main-local` and *not* contained in `origin/main`. That rejects the
+in the line's branch (`origin/main-local` or `origin/main-window`) and *not*
+contained in `origin/main`. That rejects the
 two ways of tagging something that is not a fork build: a commit that never
 reached `main-local`, such as an unmerged work branch or a `main-local` that was
 never pushed, and a commit on `main`, which mirrors upstream and carries no fork
@@ -253,15 +303,18 @@ Reading a version number is never the reliable way to tell what a build
 contains. That is recorded where it cannot go stale: the commit named on the
 release page, and the range of commits the notes cover.
 
-Any tag starting with `fork-v` triggers the workflow, so the scheme is a
-convention rather than something enforced.
+`window-v` tags follow the same scheme, with their own counter: the first
+build is `window-v0.46.0` whatever number the `fork-v` series has reached.
+
+Any tag starting with `fork-v` or `window-v` triggers the workflow, so the
+scheme is a convention rather than something enforced.
 
 ### Why the tag prefix
 
 `main-local` inherits upstream's `.github/workflows/release.yml`, which triggers
 on `v*.*.*` tags. A tag named `v0.46.0` would therefore start two release runs
-competing to publish the same tag. The `fork-v` prefix matches only the local
-release workflow's filter, which leaves upstream's file untouched and free to
+competing to publish the same tag. The `fork-v` and `window-v` prefixes match only the local
+release workflow's filters, which leaves upstream's file untouched and free to
 merge cleanly on every sync.
 
 Keeping upstream's tags out of this fork means no `v*.*.*` tag is expected to

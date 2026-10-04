@@ -1,16 +1,21 @@
 ---
-# Publishes fork builds from `main-local`, the branch that carries this fork's
-# own work on top of upstream. See LOCAL-RELEASES.md for the branch model.
+# Publishes fork builds. Each tag prefix belongs to one integration branch:
 #
-# The tag prefix is what keeps this separate from upstream's release.yml, which
-# this branch also carries and which fires on `v*.*.*`. A `fork-v0.46.0` tag
-# matches only the filter below, so cutting a fork build never starts an
-# upstream release run alongside it.
+#   fork-v*    main-local    upstream main plus this fork's work
+#   window-v*  main-window   upstream's zellij-window branch plus this fork's work
+#
+# See LOCAL-RELEASES.md for the branch model.
+#
+# The tag prefixes are what keep this separate from upstream's release.yml,
+# which these branches also carry and which fires on `v*.*.*`. A `fork-v0.46.0`
+# or `window-v0.46.0` tag matches only the filters below, so cutting a fork
+# build never starts an upstream release run alongside it.
 name: Local Release
 on:
   push:
     tags:
       - "fork-v*"
+      - "window-v*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +27,7 @@ jobs:
   #
   # Nothing else covers it: zellij's rust.yml and e2e.yml both trigger on
   # `branches: [main]` only, so neither runs for a tag push or for any commit on
-  # main-local. Tests that decide whether a release is published have to run
+  # main-local or main-window. Tests that decide whether a release is published have to run
   # inside the workflow that publishes it.
   test:
     name: test
@@ -66,30 +71,54 @@ jobs:
           # changelog and the step below needs to resolve origin/main*.
           fetch-depth: 0
 
+      # Everything below that names a branch or a tag series takes it from here,
+      # so adding a release line means adding a case to this step and a filter
+      # to the trigger above.
+      - name: Work out the release line
+        id: line
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          case "${tag}" in
+            fork-v*)   prefix="fork-v";   branch="main-local" ;;
+            window-v*) prefix="window-v"; branch="main-window" ;;
+            *)
+              echo "::error::${tag} matches no release line. Add it to the trigger and to this step."
+              exit 1
+              ;;
+          esac
+          echo "::notice::${tag} is a ${branch} build."
+          {
+            echo "prefix=${prefix}"
+            echo "branch=${branch}"
+          } >> "$GITHUB_OUTPUT"
+
       # The release notes claim this artifact is a fork build. Two ways to tag
-      # something that is not: a commit that never reached main-local (an
-      # unmerged work branch, or main-local not yet pushed), or a commit on
+      # something that is not: a commit that never reached the line's branch (an
+      # unmerged work branch, or the branch not yet pushed), or a commit on
       # main, which is a pure mirror of upstream and carries no fork work at
       # all. Reject both before anything is built or published.
       - name: Verify the tag carries fork work
+        env:
+          BRANCH: ${{ steps.line.outputs.branch }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
 
-          for ref in origin/main origin/main-local; do
+          for ref in origin/main "origin/${BRANCH}"; do
             git rev-parse --verify --quiet "refs/remotes/${ref}" >/dev/null || {
               echo "::error::${ref} is missing from this checkout, so ${tag} cannot be verified."
               exit 1
             }
           done
 
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main-local; then
-            echo "::error::${tag} points at ${GITHUB_SHA}, which is not on origin/main-local. Push main-local first, then push the tag."
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${BRANCH}"; then
+            echo "::error::${tag} points at ${GITHUB_SHA}, which is not on origin/${BRANCH}. Push ${BRANCH} first, then push the tag."
             exit 1
           fi
 
           if git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "::error::${tag} points at ${GITHUB_SHA}, which is on main and so carries no fork work. Tag a commit on main-local instead."
+            echo "::error::${tag} points at ${GITHUB_SHA}, which is on main and so carries no fork work. Tag a commit on ${BRANCH} instead."
             exit 1
           fi
 
@@ -115,29 +144,33 @@ jobs:
       # upstream tag older than the previous fork build, and every fork commit
       # ever made would be listed again as though it were new.
       #
-      # Compare against the previous fork release instead, since what a reader
-      # wants is what changed since the build they already have. That is the
-      # fork tag just below this one in version order, not the nearest one in
-      # this commit's ancestry: main-local is rebuilt from main and its branches
-      # whenever that is simpler than merging (see LOCAL-RELEASES.md), and a
-      # rebuilt main-local no longer descends from the builds cut before it.
-      # A range between two unrelated commits still means the right thing to
-      # git-cliff: everything this build has that the previous one did not.
+      # Compare against the previous release of the same line instead, since
+      # what a reader wants is what changed since the build they already have.
+      # That is the tag with this one's prefix just below it in version order,
+      # so a window-v* build is never compared against a fork-v* one. It is
+      # also not the nearest such tag in this commit's ancestry: the
+      # integration branches are rebuilt from their parts whenever that is
+      # simpler than merging (see LOCAL-RELEASES.md), and a rebuilt branch no
+      # longer descends from the builds cut before it. A range between two
+      # unrelated commits still means the right thing to git-cliff: everything
+      # this build has that the previous one did not.
       #
-      # The first fork release has no earlier build to compare to, so it falls
+      # The first release of a line has no earlier build to compare to, so it falls
       # back to the nearest upstream tag it descends from. That is not always
       # the newest upstream release: zellij cuts its `chore(release)` commit on
       # a release branch rather than on main, so a released version's tag is
-      # usually not an ancestor of anything here. The first fork build therefore
+      # usually not an ancestor of anything here. The first build therefore
       # reaches back to the last tag that is, and lists rather more than one
       # release's worth of upstream work. It affects that build alone.
       - name: Work out which commits are new
         id: range
+        env:
+          PREFIX: ${{ steps.line.outputs.prefix }}
         run: |
           set -euo pipefail
           current="${GITHUB_REF#refs/tags/}"
 
-          previous="$(git tag --list 'fork-v*' --sort=-version:refname \
+          previous="$(git tag --list "${PREFIX}*" --sort=-version:refname \
             | grep -Fx -A1 "${current}" | sed -n 2p || true)"
           if [[ -z "${previous}" ]]; then
             previous="$(git describe --tags --abbrev=0 --match 'v*' "${current}^" 2>/dev/null || true)"
@@ -210,10 +243,12 @@ jobs:
       # The release page is the only place a reader sees these artifacts, so it
       # has to say plainly whose build this is and exactly what went into it.
       - name: Compose release notes
+        env:
+          BRANCH: ${{ steps.line.outputs.branch }}
         run: |
           set -euo pipefail
           {
-            echo "Fork build from \`main-local\`. Not an upstream zellij release."
+            echo "Fork build from \`${BRANCH}\`. Not an upstream zellij release."
             echo
             echo "| | |"
             echo "|---|---|"
