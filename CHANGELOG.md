@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
+* (BREAKING CHANGE zellij-tile) `NestedListItem::new` now require a `Text` instead of a `&str` (https://github.com/zellij-org/zellij/pull/5611)
+* (BREAKING CHANGE zellij-tile) `Text::new` is replaced by `Text::from` (https://github.com/zellij-org/zellij/pull/5611)
+    * Migration help: to help with the breaking change, this command may help (not for 100% of the cases but a good first pass): `ast-grep run -p 'Text::new($A)' -r 'Text::from($A)' --update-all`
 * fix: forward OSC7 (cwd changes) to host terminal (https://github.com/zellij-org/zellij/pull/4867)
 * performance: reduce server memory usage by not copying the builtin plugins onto the heap (https://github.com/zellij-org/zellij/pull/5622)
 * feat: upstream Yazelix graphics and stacked-pane fixes, named swap-layout selection and configurable pane-border styles (https://github.com/zellij-org/zellij/pull/5630)
@@ -17,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * fix: compress kitty images if the host terminal supports it (https://github.com/zellij-org/zellij/pull/5608)
 * fix: add websocket heartbeat to webserver to prevernt idle disconnect through proxies (https://github.com/zellij-org/zellij/pull/4633)
 * fix: memory-usage optimizations and multiple-pane-single-instance-plugins (https://github.com/zellij-org/zellij/pull/5662)
+* fix: erasing wide CJK character correctness (https://github.com/zellij-org/zellij/pull/5657)
+* feat: let a plugin give its layout space back while it has nothing to draw, so a bar plugin does not hold an empty row (https://github.com/zellij-org/zellij/issues/5588)
 
 ## [0.45.1] - 2026-08-28
 * fix: nested-session detection over SSH (https://github.com/zellij-org/zellij/pull/5522)

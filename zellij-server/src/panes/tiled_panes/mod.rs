@@ -1,4 +1,5 @@
 mod pane_resizer;
+mod panes_to_hide;
 mod stacked_panes;
 mod tiled_pane_grid;
 
@@ -26,6 +27,7 @@ use crate::{
     ui::pane_contents_and_ui::PaneContentsAndUi,
     ClientId,
 };
+use panes_to_hide::PanesToHide;
 use stacked_panes::StackedPanes;
 use zellij_utils::{
     data::{
@@ -83,7 +85,7 @@ pub struct TiledPanes {
     session_is_mirrored: bool,
     active_panes: ActivePanes,
     pane_frame_style: PaneFrameStyle,
-    panes_to_hide: HashSet<PaneId>,
+    panes_to_hide: PanesToHide,
     fullscreen_is_active: Option<PaneId>,
     fullscreen_covers_ui: Rc<RefCell<bool>>,
     senders: ThreadSenders,
@@ -130,7 +132,7 @@ impl TiledPanes {
             session_is_mirrored,
             active_panes: ActivePanes::new(&os_api),
             pane_frame_style,
-            panes_to_hide: HashSet::new(),
+            panes_to_hide: PanesToHide::default(),
             fullscreen_is_active: None,
             fullscreen_covers_ui,
             senders,
@@ -426,7 +428,7 @@ impl TiledPanes {
             None => {
                 // we couldn't add the pane normally, let's see if there's room in one of the
                 // stacks...
-                let _ = pane_grid.make_pane_stacked(active_pane_id);
+                let newly_stacked = pane_grid.make_pane_stacked(active_pane_id).is_ok();
                 match pane_grid.make_room_in_stack_of_pane_id_for_pane(active_pane_id) {
                     Ok(new_pane_geom) => {
                         pane.set_geom(new_pane_geom);
@@ -434,6 +436,9 @@ impl TiledPanes {
                         return;
                     },
                     Err(_e) => {
+                        if newly_stacked {
+                            pane_grid.unstack_pane(active_pane_id);
+                        }
                         return self.add_pane_without_stacked_resize(
                             pane_id,
                             pane,
@@ -464,9 +469,8 @@ impl TiledPanes {
             .get_pane_geom(active_pane_id)
             .map(|p| p.is_stacked())
             .unwrap_or(false);
-        if !pane_id_is_stacked {
-            let _ = pane_grid.make_pane_stacked(&active_pane_id);
-        }
+        let newly_stacked =
+            !pane_id_is_stacked && pane_grid.make_pane_stacked(&active_pane_id).is_ok();
         match pane_grid.make_room_in_stack_of_pane_id_for_pane(active_pane_id) {
             Ok(new_pane_geom) => {
                 pane.set_geom(new_pane_geom);
@@ -475,6 +479,9 @@ impl TiledPanes {
                 return;
             },
             Err(e) => {
+                if newly_stacked {
+                    pane_grid.unstack_pane(active_pane_id);
+                }
                 log::error!("Failed to add pane to stack: {}", e);
             },
         }
@@ -495,9 +502,11 @@ impl TiledPanes {
             .get_pane_geom(&root_pane_id)
             .map(|p| p.is_stacked())
             .unwrap_or(false);
+        let mut newly_stacked = false;
         if !pane_id_is_stacked {
-            if let Err(e) = pane_grid.make_pane_stacked(&root_pane_id) {
-                log::error!("Failed to make pane stacked: {:?}", e);
+            match pane_grid.make_pane_stacked(&root_pane_id) {
+                Ok(()) => newly_stacked = true,
+                Err(e) => log::error!("Failed to make pane stacked: {:?}", e),
             }
         }
         match pane_grid.make_room_in_stack_of_pane_id_for_pane(&root_pane_id) {
@@ -508,6 +517,9 @@ impl TiledPanes {
                 return;
             },
             Err(e) => {
+                if newly_stacked {
+                    pane_grid.unstack_pane(&root_pane_id);
+                }
                 log::error!("Failed to add pane to stack: {}", e);
             },
         }
@@ -550,6 +562,11 @@ impl TiledPanes {
                 // for the other panes in this tab
                 let is_ui_pane =
                     !p.selectable() || (p.borderless() && matches!(p.pid(), PaneId::Plugin(_)));
+                // a collapsed pane holds no space, so it must not shrink the viewport either,
+                // or the panes that grew over it would be sized as if it were still there
+                if self.panes_to_hide.is_covered(&p.pid()) {
+                    return None;
+                }
                 if is_ui_pane && is_inside_viewport(&self.viewport.borrow(), p) {
                     Some(geom.into())
                 } else {
@@ -2045,6 +2062,9 @@ impl TiledPanes {
             );
             pane_grid.next_selectable_pane_id(&active_pane_id)
         };
+        let Some(next_active_pane_id) = next_active_pane_id else {
+            return;
+        };
         if self
             .panes
             .get(&next_active_pane_id)
@@ -2074,6 +2094,9 @@ impl TiledPanes {
                 *self.viewport.borrow(),
             );
             pane_grid.previous_selectable_pane_id(&active_pane_id)
+        };
+        let Some(next_active_pane_id) = next_active_pane_id else {
+            return;
         };
 
         if self
@@ -2455,6 +2478,12 @@ impl TiledPanes {
                 pane_grid.next_selectable_pane_id(&pane_id)
             }
         };
+        let Some(new_position_id) = new_position_id else {
+            return;
+        };
+        if !self.panes.contains_key(&new_position_id) {
+            return;
+        }
         if self
             .panes
             .get(&new_position_id)
@@ -2466,11 +2495,15 @@ impl TiledPanes {
             self.reapply_pane_frames();
         }
 
-        let current_position = self.panes.get(&pane_id).unwrap();
+        let Some(current_position) = self.panes.get(&pane_id) else {
+            return;
+        };
         let prev_geom = current_position.position_and_size();
         let prev_geom_override = current_position.geom_override();
 
-        let new_position = self.panes.get_mut(&new_position_id).unwrap();
+        let Some(new_position) = self.panes.get_mut(&new_position_id) else {
+            return;
+        };
         let next_geom = new_position.position_and_size();
         let next_geom_override = new_position.geom_override();
         new_position.set_geom(prev_geom);
@@ -2486,7 +2519,9 @@ impl TiledPanes {
         .unwrap();
         new_position.set_should_render(true);
 
-        let current_position = self.panes.get_mut(&pane_id).unwrap();
+        let Some(current_position) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
         current_position.set_geom(next_geom);
         if let Some(geom) = next_geom_override {
             current_position.set_geom_override(geom);
@@ -2765,6 +2800,7 @@ impl TiledPanes {
     }
     pub fn extract_pane(&mut self, pane_id: PaneId) -> Option<Box<dyn Pane>> {
         self.reset_boundaries();
+        self.panes_to_hide.forget(&pane_id);
         self.panes.remove(&pane_id)
     }
     pub fn remove_pane(&mut self, pane_id: PaneId) -> Option<Box<dyn Pane>> {
@@ -2772,6 +2808,7 @@ impl TiledPanes {
             .panes
             .get(&pane_id)
             .and_then(|pane| pane.position_and_size().logical_position);
+        self.panes_to_hide.forget(&pane_id);
         let mut pane_grid = TiledPaneGrid::new(
             &mut self.panes,
             &self.panes_to_hide,
@@ -2836,8 +2873,7 @@ impl TiledPanes {
     }
     pub fn unset_fullscreen(&mut self) {
         if let Some(fullscreen_pane_id) = self.fullscreen_is_active {
-            let panes_to_hide: Vec<_> = self.panes_to_hide.iter().copied().collect();
-            for pane_id in panes_to_hide {
+            for pane_id in self.panes_to_hide.unset_fullscreen() {
                 let pane = self.get_pane_mut(pane_id).unwrap();
                 pane.set_should_render(true);
                 pane.set_should_render_boundaries(true);
@@ -2855,7 +2891,6 @@ impl TiledPanes {
                 let viewport_pane = self.get_pane_mut(pid).unwrap();
                 viewport_pane.reset_size_and_position_override();
             }
-            self.panes_to_hide.clear();
             if let Some(fullscreen_pane) = self.get_pane_mut(fullscreen_pane_id) {
                 fullscreen_pane.reset_size_and_position_override();
             }
@@ -2901,10 +2936,11 @@ impl TiledPanes {
     }
 
     fn set_fullscreen(&mut self, pane_id: PaneId, covers_ui: bool) {
-        self.panes_to_hide = self.panes_covered_by_fullscreen(pane_id, covers_ui);
-        if self.panes_to_hide.is_empty() && !covers_ui {
+        let covered = self.panes_covered_by_fullscreen(pane_id, covers_ui);
+        if covered.is_empty() && !covers_ui {
             return;
         }
+        self.panes_to_hide.set_fullscreen(pane_id, covered);
         if covers_ui {
             self.expand_pane_over_whole_display(pane_id);
         } else {
@@ -3056,11 +3092,57 @@ impl TiledPanes {
     pub fn visible_panes_count(&self) -> usize {
         self.panes.len().saturating_sub(self.panes_to_hide.len())
     }
-    pub fn add_to_hidden_panels(&mut self, pid: PaneId) {
-        self.panes_to_hide.insert(pid);
+    /// Take a pane out of the layout's space, or put it back, and say whether that changed
+    /// anything.
+    ///
+    /// A collapsed pane drops out of the constraint solve, so its neighbors grow over the
+    /// space it held. It keeps its size constraint the whole time, so expanding gives back
+    /// exactly the row or column the layout asked for rather than an approximation of it.
+    ///
+    /// The caller relays out the tab afterwards, which is also where the pane's geometry is
+    /// kept current: see `take_collapsed_panes`.
+    pub fn set_pane_collapsed(&mut self, pane_id: PaneId, collapsed: bool) -> bool {
+        if collapsed {
+            self.panes_to_hide.set_covered(pane_id)
+        } else {
+            self.panes_to_hide.unset_covered(&pane_id)
+        }
     }
-    pub fn remove_from_hidden_panels(&mut self, pid: PaneId) {
-        self.panes_to_hide.remove(&pid);
+    pub fn pane_is_collapsed(&self, pane_id: &PaneId) -> bool {
+        self.panes_to_hide.is_covered(pane_id)
+    }
+    /// Let the collapsed panes take part in the next solve, and hand them back so the caller
+    /// can collapse them again over the result.
+    ///
+    /// Being filtered out of the solve is what stops a collapsed pane from holding space, but
+    /// it also means nothing writes geometry to it, so across a resize or a relayout it would
+    /// be left describing a display area that no longer exists. That is worse than merely
+    /// stale: the solver reconstructs the layout tree from where the panes currently sit, so
+    /// one pane in the wrong place gives the next solve a tree that does not match the screen.
+    /// Solving with them and then collapsing again over the answer keeps their geometry
+    /// current for the moment they are expanded.
+    ///
+    /// Paired with `restore_collapsed_panes`. Nesting is safe: the inner call finds nothing
+    /// left to take and restores nothing.
+    pub fn take_collapsed_panes(&mut self) -> HashSet<PaneId> {
+        self.panes_to_hide.take_covered()
+    }
+    /// Put back what `take_collapsed_panes` took, and say whether there was anything to put
+    /// back. The caller solves again when there was, so the neighbors reclaim the space.
+    ///
+    /// A pane that closed while the set was taken out was never forgotten by `panes_to_hide`,
+    /// so anything that is no longer here is dropped on the way in.
+    pub fn restore_collapsed_panes(&mut self, collapsed: HashSet<PaneId>) -> bool {
+        let panes = &self.panes;
+        let still_here: HashSet<PaneId> = collapsed
+            .into_iter()
+            .filter(|pane_id| panes.contains_key(pane_id))
+            .collect();
+        if still_here.is_empty() {
+            return false;
+        }
+        self.panes_to_hide.restore_covered(still_here);
+        true
     }
     pub fn unfocus_all_panes(&mut self) {
         self.active_panes.unfocus_all_panes(&mut self.panes);

@@ -447,6 +447,7 @@ pub enum ScreenContext {
     ToggleGroupMarking,
     SessionSharingStatusChange,
     SetMouseSelectionSupport,
+    SetPaneCollapsed,
     InterceptKeyPresses,
     ClearKeyPressesIntercepts,
     ReplacePaneWithExistingPane,

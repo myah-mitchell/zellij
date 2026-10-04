@@ -1,3 +1,4 @@
+use super::panes_to_hide::PanesToHide;
 use crate::{
     panes::PaneId,
     tab::{Pane, MIN_TERMINAL_HEIGHT},
@@ -20,7 +21,7 @@ impl<'a> StackedPanes<'a> {
     }
     pub fn new_from_btreemap(
         panes: impl IntoIterator<Item = (&'a PaneId, &'a mut Box<dyn Pane>)>,
-        panes_to_hide: &HashSet<PaneId>,
+        panes_to_hide: &PanesToHide,
     ) -> Self {
         let panes: HashMap<_, _> = panes
             .into_iter()
@@ -178,15 +179,17 @@ impl<'a> StackedPanes<'a> {
     }
     pub fn position_and_size_of_stack(&self, id: &PaneId) -> Option<PaneGeom> {
         let all_stacked_pane_positions = self.positions_in_stack(id).ok()?;
-        let position_of_flexible_pane = self
-            .position_of_flexible_pane(&all_stacked_pane_positions)
-            .ok()?;
-        let (_flexible_pane_id, flexible_pane) = all_stacked_pane_positions
-            .iter()
-            .nth(position_of_flexible_pane)?;
         let (_, first_pane_in_stack) = all_stacked_pane_positions.first()?;
         let (_, last_pane_in_stack) = all_stacked_pane_positions.last()?;
-        let mut rows = flexible_pane.rows;
+        let mut rows = match self.position_of_flexible_pane(&all_stacked_pane_positions) {
+            Ok(position_of_flexible_pane) => {
+                all_stacked_pane_positions
+                    .get(position_of_flexible_pane)?
+                    .1
+                    .rows
+            },
+            Err(_) => first_pane_in_stack.rows,
+        };
         rows.set_inner(
             (last_pane_in_stack.y - first_pane_in_stack.y) + last_pane_in_stack.rows.as_usize(),
         );

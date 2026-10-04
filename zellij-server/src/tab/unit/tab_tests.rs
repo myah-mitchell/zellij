@@ -1023,6 +1023,185 @@ pub fn cannot_split_panes_horizontally_when_active_pane_has_fixed_rows() {
     assert_eq!(tab.tiled_panes.panes.len(), 2, "Tab still has two panes");
 }
 
+fn create_tab_with_small_fixed_top_left_pane() -> Tab {
+    let size = Size {
+        cols: 120,
+        rows: 40,
+    };
+    let mut fixed_cols_child = TiledPaneLayout::default();
+    fixed_cols_child.split_size = Some(SplitSize::Fixed(24));
+    let mut top_row = TiledPaneLayout::default();
+    top_row.split_size = Some(SplitSize::Fixed(7));
+    top_row.children_split_direction = SplitDirection::Vertical;
+    top_row.children = vec![fixed_cols_child, TiledPaneLayout::default()];
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Horizontal;
+    initial_layout.children = vec![top_row, TiledPaneLayout::default()];
+    let mut tab = create_new_tab_with_layout(size, initial_layout);
+    tab.focus_pane_with_id(PaneId::Terminal(0), false, false, 1)
+        .unwrap();
+    tab
+}
+
+fn tiled_pane_is_stacked(tab: &Tab, pane_id: PaneId) -> bool {
+    tab.tiled_panes
+        .panes
+        .get(&pane_id)
+        .unwrap()
+        .position_and_size()
+        .is_stacked()
+}
+
+#[test]
+pub fn new_pane_next_to_small_fixed_pane_keeps_it_unstacked() {
+    let mut tab = create_tab_with_small_fixed_top_left_pane();
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::default(),
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert!(
+        tab.tiled_panes.panes.contains_key(&PaneId::Terminal(3)),
+        "new pane was added"
+    );
+    assert!(
+        !tiled_pane_is_stacked(&tab, PaneId::Terminal(0)),
+        "small fixed pane is not left in a stack"
+    );
+    tab.close_pane(PaneId::Terminal(3), false, None);
+    assert!(
+        !tab.tiled_panes.panes.contains_key(&PaneId::Terminal(3)),
+        "new pane was closed"
+    );
+    assert_eq!(tab.tiled_panes.panes.len(), 3, "original panes remain");
+}
+
+#[test]
+pub fn failed_stacked_pane_on_small_fixed_pane_keeps_it_unstacked() {
+    let mut tab = create_tab_with_small_fixed_top_left_pane();
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: None,
+            borderless: None,
+            border_style: None,
+        },
+        Some(1),
+        None,
+    )
+    .unwrap();
+    assert!(
+        !tiled_pane_is_stacked(&tab, PaneId::Terminal(0)),
+        "small fixed pane is not left in a stack"
+    );
+    tab.close_pane(PaneId::Terminal(1), false, None);
+    assert!(
+        tab.tiled_panes.panes.contains_key(&PaneId::Terminal(0)),
+        "small fixed pane remains"
+    );
+    assert!(
+        !tab.tiled_panes.panes.contains_key(&PaneId::Terminal(1)),
+        "neighbouring pane was closed"
+    );
+}
+
+#[test]
+pub fn moving_suppressed_pane_leaves_tiled_panes_in_place() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let stacked_resize = true;
+    let mut tab = create_new_tab(size, stacked_resize);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.replace_active_pane_with_editor_pane(PaneId::Terminal(3), 1)
+        .unwrap();
+    assert!(
+        tab.suppressed_panes
+            .values()
+            .any(|(_, p)| p.pid() == PaneId::Terminal(2)),
+        "pane is suppressed"
+    );
+    assert!(
+        !tab.tiled_panes.panes.contains_key(&PaneId::Terminal(2)),
+        "suppressed pane is not tiled"
+    );
+    let geoms_before: Vec<_> = tab
+        .tiled_panes
+        .panes
+        .iter()
+        .map(|(id, p)| (*id, p.position_and_size()))
+        .collect();
+    tab.move_pane(PaneId::Terminal(2));
+    let geoms_after: Vec<_> = tab
+        .tiled_panes
+        .panes
+        .iter()
+        .map(|(id, p)| (*id, p.position_and_size()))
+        .collect();
+    assert_eq!(geoms_before, geoms_after, "tiled panes did not move");
+}
+
+#[test]
+pub fn moving_pane_hidden_by_fullscreen_keeps_both_panes() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let stacked_resize = false;
+    let mut tab = create_new_tab(size, stacked_resize);
+    tab.vertical_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab.toggle_active_pane_fullscreen(1);
+    let search_backwards = false;
+    tab.tiled_panes
+        .move_pane(search_backwards, PaneId::Terminal(1));
+    tab.tiled_panes
+        .move_pane(!search_backwards, PaneId::Terminal(1));
+    assert_eq!(tab.tiled_panes.panes.len(), 2, "both panes remain");
+}
+
+#[test]
+pub fn closing_pane_next_to_stack_without_flexible_pane_removes_it() {
+    let mut tab = create_tab_with_small_fixed_top_left_pane();
+    tab.focus_pane_with_id(PaneId::Terminal(2), false, false, 1)
+        .unwrap();
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::default(),
+        Some(1),
+        None,
+    )
+    .unwrap();
+    {
+        let small_fixed_pane = tab.tiled_panes.panes.get_mut(&PaneId::Terminal(0)).unwrap();
+        let mut geom = small_fixed_pane.position_and_size();
+        geom.stacked = Some(999);
+        small_fixed_pane.set_geom(geom);
+    }
+    tab.close_pane(PaneId::Terminal(3), false, None);
+    assert!(
+        !tab.tiled_panes.panes.contains_key(&PaneId::Terminal(3)),
+        "pane was closed"
+    );
+    assert_eq!(tab.tiled_panes.panes.len(), 3, "original panes remain");
+}
+
 #[test]
 pub fn toggle_focused_pane_fullscreen() {
     let size = Size {
@@ -18332,4 +18511,206 @@ fn ctrl_wheel_resizes_and_alt_wheel_jumps_prompts_regardless_of_the_line_count()
     alt.wheel_lines = 9;
     tab.handle_mouse_event(&alt, 1).unwrap();
     assert_ne!(scrolled_lines(&tab), 9);
+}
+
+fn tab_with_a_pane_above_a_pane() -> Tab {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut tab = create_new_tab(size, true);
+    tab.horizontal_split(PaneId::Terminal(2), None, 1, None, None)
+        .unwrap();
+    tab
+}
+
+fn geom_of(tab: &Tab, pane_id: PaneId) -> PaneGeom {
+    tab.tiled_panes
+        .panes
+        .get(&pane_id)
+        .unwrap()
+        .position_and_size()
+}
+
+#[test]
+fn collapsing_a_pane_gives_its_rows_to_its_neighbor() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    let rows_before = geom_of(&tab, PaneId::Terminal(1)).rows.as_usize();
+
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+
+    assert_eq!(
+        geom_of(&tab, PaneId::Terminal(1)).rows.as_usize(),
+        20,
+        "the pane that stayed should hold every row the tab has"
+    );
+    assert!(
+        rows_before < 20,
+        "the two panes should have been sharing the rows to begin with"
+    );
+}
+
+#[test]
+fn expanding_a_pane_restores_the_geometry_it_had() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    let before = (
+        geom_of(&tab, PaneId::Terminal(1)),
+        geom_of(&tab, PaneId::Terminal(2)),
+    );
+
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+    tab.set_pane_collapsed(PaneId::Terminal(2), false);
+
+    // exact equality rather than a row count: the point of collapsing instead of suppressing
+    // is that the layout comes back as it was, position and constraint included
+    assert_eq!(
+        (
+            geom_of(&tab, PaneId::Terminal(1)),
+            geom_of(&tab, PaneId::Terminal(2))
+        ),
+        before
+    );
+}
+
+#[test]
+fn a_collapsed_pane_keeps_the_geometry_it_will_come_back_to() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    let before = geom_of(&tab, PaneId::Terminal(2));
+
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+
+    assert_eq!(
+        geom_of(&tab, PaneId::Terminal(2)),
+        before,
+        "a collapsed pane holds no space, but it still describes where it will come back, \
+         so collapsing on its own must not move it"
+    );
+}
+
+#[test]
+fn collapsing_a_pane_that_is_already_collapsed_does_nothing() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+    let after_first = geom_of(&tab, PaneId::Terminal(1));
+
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+
+    assert_eq!(geom_of(&tab, PaneId::Terminal(1)), after_first);
+}
+
+#[test]
+fn a_collapsed_pane_is_still_collapsed_after_a_fullscreen_comes_and_goes() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+    tab.focus_pane_with_id(PaneId::Terminal(1), false, false, 1)
+        .unwrap();
+
+    // fullscreen rebuilds the hidden set from scratch, so a collapse that lived only there
+    // would be handed its rows back on the way out
+    tab.toggle_active_pane_fullscreen(1);
+    tab.toggle_active_pane_fullscreen(1);
+
+    assert!(tab.tiled_panes.pane_is_collapsed(&PaneId::Terminal(2)));
+    assert_eq!(
+        geom_of(&tab, PaneId::Terminal(1)).rows.as_usize(),
+        20,
+        "the pane that stayed should still hold every row"
+    );
+}
+
+#[test]
+fn closing_a_collapsed_pane_forgets_that_it_was_collapsed() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    tab.set_pane_collapsed(PaneId::Terminal(2), true);
+
+    tab.close_pane(PaneId::Terminal(2), false, None);
+
+    assert!(
+        !tab.tiled_panes.pane_is_collapsed(&PaneId::Terminal(2)),
+        "a pane id Zellij hands out again must not arrive already invisible"
+    );
+}
+
+#[test]
+fn collapsing_a_pane_that_is_not_in_the_tab_does_nothing() {
+    let mut tab = tab_with_a_pane_above_a_pane();
+    let before = (
+        geom_of(&tab, PaneId::Terminal(1)),
+        geom_of(&tab, PaneId::Terminal(2)),
+    );
+
+    tab.set_pane_collapsed(PaneId::Terminal(99), true);
+
+    assert!(!tab.tiled_panes.pane_is_collapsed(&PaneId::Terminal(99)));
+    assert_eq!(
+        (
+            geom_of(&tab, PaneId::Terminal(1)),
+            geom_of(&tab, PaneId::Terminal(2))
+        ),
+        before
+    );
+}
+
+/// The shape a bar plugin actually has: a full-width pane with a one-row pane pinned
+/// under it, the way `pane size=1 borderless` in a layout arrives.
+fn tab_with_a_one_row_bar_under_a_pane(size: Size) -> Tab {
+    let mut layout = TiledPaneLayout::default();
+    layout.children_split_direction = SplitDirection::Horizontal;
+    let mut bar = TiledPaneLayout::default();
+    bar.split_size = Some(SplitSize::Fixed(1));
+    layout.children = vec![TiledPaneLayout::default(), bar];
+    create_new_tab_with_layout(size, layout)
+}
+
+#[test]
+fn a_collapsed_pane_follows_the_tab_when_it_is_resized() {
+    let mut tab = tab_with_a_one_row_bar_under_a_pane(Size {
+        cols: 121,
+        rows: 20,
+    });
+    let main_pane = PaneId::Terminal(0);
+    let bar = PaneId::Terminal(1);
+    tab.set_pane_collapsed(bar, true);
+
+    // the tab changes shape, the way a nested session's does when its host expands it
+    // over the whole display and takes its own bars off the screen with it
+    tab.resize_whole_tab(Size {
+        cols: 118,
+        rows: 23,
+    })
+    .unwrap();
+
+    // being left out of the solve is what keeps a collapsed pane from holding space, but
+    // it must not leave the pane describing a tab that no longer exists: the solver reads
+    // the layout tree back off pane geometry, so a stale one breaks the next solve
+    assert_eq!(
+        geom_of(&tab, bar).y,
+        22,
+        "the collapsed bar should still be tracking the bottom of the tab"
+    );
+    assert_eq!(
+        geom_of(&tab, bar).cols.as_usize(),
+        118,
+        "the collapsed bar should still be tracking the width of the tab"
+    );
+    assert_eq!(
+        geom_of(&tab, main_pane).rows.as_usize(),
+        23,
+        "the pane that stayed should hold every row of the resized tab"
+    );
+
+    tab.set_pane_collapsed(bar, false);
+
+    assert_eq!(
+        geom_of(&tab, main_pane).rows.as_usize(),
+        22,
+        "the pane that stayed should give the row back"
+    );
+    assert_eq!(
+        geom_of(&tab, bar).y,
+        22,
+        "the bar should come back on the bottom row, not partway up the pane above it"
+    );
+    assert_eq!(geom_of(&tab, bar).rows.as_usize(), 1);
+    assert_eq!(geom_of(&tab, bar).cols.as_usize(), 118);
 }
