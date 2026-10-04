@@ -10,65 +10,41 @@
 # which these branches also carry and which fires on `v*.*.*`. A `fork-v0.46.0`
 # or `window-v0.46.0` tag matches only the filters below, so cutting a fork
 # build never starts an upstream release run alongside it.
+#
+# Each release carries a Linux build and a Windows build. Started by hand from
+# the Actions tab instead, the workflow tests and builds whichever branch is
+# picked there and keeps the results as run artifacts, but publishes nothing.
+# That is the way to try a change to this file, or a branch that has not been
+# built on Windows before, without spending a version number on it.
 name: Local Release
 on:
   push:
     tags:
       - "fork-v*"
       - "window-v*"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  # A fork build that fails its tests is worse than no build, since it gets
-  # installed unattended from the release page. The release job waits on this.
-  #
-  # Nothing else covers it: zellij's rust.yml and e2e.yml both trigger on
-  # `branches: [main]` only, so neither runs for a tag push or for any commit on
-  # main-local or main-window. Tests that decide whether a release is published have to run
-  # inside the workflow that publishes it.
-  test:
-    name: test
+  # Runs first because it is cheap and the rest is not: a tag on the wrong
+  # commit should fail in seconds, not after half an hour of tests and builds.
+  verify:
+    name: verify
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    # Compiling and testing never needs to write to the repository. Only the
-    # release job below gets a token that can.
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Every zellij build compiles protobuf definitions.
-      - name: Install Protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # No version or target inputs: rust-toolchain.toml pins the channel and
-      # lists both wasm32-wasip1 and x86_64-unknown-linux-musl, so restating any
-      # of it here would only add somewhere for it to drift. Upstream's own test
-      # job in rust.yml is set up the same way.
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          rustflags: ""
-
-      - name: Run tests
-        run: cargo xtask test
-
-  release:
-    name: release
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the release
+    outputs:
+      prefix: ${{ steps.line.outputs.prefix }}
+      branch: ${{ steps.line.outputs.branch }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Fetches every branch and tag, which git-cliff needs for the
-          # changelog and the step below needs to resolve origin/main*.
+          # Every branch, so the step below can resolve origin/main*.
           fetch-depth: 0
 
       # Everything below that names a branch or a tag series takes it from here,
@@ -122,6 +98,185 @@ jobs:
             exit 1
           fi
 
+  # A fork build that fails its tests is worse than no build, since it gets
+  # installed unattended from the release page. The builds wait on this.
+  #
+  # Nothing else covers it: zellij's rust.yml and e2e.yml both trigger on
+  # `branches: [main]` only, so neither runs for a tag push or for any commit on
+  # main-local or main-window. Tests that decide whether a release is published
+  # have to run inside the workflow that publishes it.
+  #
+  # Each platform runs what upstream's rust.yml runs for it. Linux gets the
+  # whole `cargo xtask test`. Windows gets the library tests of the three crates
+  # upstream tests there, without default features, since that is the set
+  # upstream keeps passing on Windows; anything wider would fail on upstream's
+  # code rather than on this fork's.
+  test:
+    name: test (${{ matrix.name }})
+    needs: verify
+    # verify is skipped on a manual run, and a skipped dependency would
+    # otherwise skip this job too.
+    if: ${{ !cancelled() && needs.verify.result != 'failure' }}
+    # Compiling and testing never needs to write to the repository. Only the
+    # publish job below gets a token that can.
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Every zellij build compiles protobuf definitions.
+      - name: Install Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # No version or target inputs: rust-toolchain.toml pins the channel and
+      # lists both wasm32-wasip1 and x86_64-unknown-linux-musl, so restating any
+      # of it here would only add somewhere for it to drift. Upstream's own test
+      # jobs in rust.yml are set up the same way.
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+
+      - name: Run tests
+        if: matrix.name == 'linux'
+        run: cargo xtask test
+
+      - name: Run tests
+        if: matrix.name == 'windows'
+        run: |
+          cargo test --no-default-features -p zellij-utils --lib
+          cargo test --no-default-features -p zellij-server --lib
+          cargo test --no-default-features -p zellij-client --lib
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: test
+    if: ${{ !cancelled() && needs.test.result == 'success' }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - name: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mirrors upstream's release job. `cross` does the musl link inside a
+      # container, but keeping this here means a fallback to a host build has
+      # what it needs rather than failing halfway through a release.
+      - name: Install musl-tools
+        if: matrix.name == 'linux'
+        run: sudo apt-get install -y --no-install-recommends musl-tools
+
+      # Upstream's Windows release installs this too: one of the dependencies
+      # assembles part of itself with NASM when built for MSVC.
+      - name: Install NASM
+        if: matrix.name == 'windows'
+        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+
+      # Builds the wasm plugins natively, then links the binary for musl through
+      # `cross`. This is the same command upstream's release.yml uses for its
+      # own x86_64 musl artifact, web support included.
+      - name: Build release binary
+        if: matrix.name == 'linux'
+        run: cargo xtask ci cross x86_64-unknown-linux-musl
+
+      # Windows cannot be cross-compiled from Linux the way musl is, so it is
+      # built natively, with the command and flags upstream's release uses.
+      # crt-static links the C runtime in, so zellij.exe runs on a machine
+      # without the Visual C++ redistributable installed.
+      - name: Build release binary
+        if: matrix.name == 'windows'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo xtask ci build-release
+
+      # Named exactly as upstream names its own artifacts, so these builds drop
+      # into anything that already knows how to unpack one. The release notes
+      # are what say where they came from.
+      - name: Create artifact
+        if: matrix.name == 'linux'
+        run: |
+          set -euo pipefail
+          mkdir dist
+          tar cvzf "dist/zellij-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" zellij
+
+      - name: Create artifact
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path target/release/zellij.exe `
+            -DestinationPath "dist/zellij-${{ matrix.target }}.zip"
+
+      # Covers the archive, under its bare name, so a reader who has downloaded
+      # both files can run `sha256sum -c` in the directory they landed in.
+      # Upstream instead hashes the unpacked binary at its full build path,
+      # which names a file the reader does not have at a path that does not
+      # exist on their machine. Bash on both platforms, since the Windows
+      # runners ship one with sha256sum and it writes the same format.
+      - name: Create checksum
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          archive="$(ls zellij-${{ matrix.target }}.*)"
+          sha256sum "${archive}" > "zellij-${{ matrix.target }}.sha256sum"
+          cat "zellij-${{ matrix.target }}.sha256sum"
+
+      # Hands the files to the publish job, and is all a manual run produces:
+      # they can be downloaded from the run's summary page.
+      - name: Keep the build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zellij-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: [verify, build]
+    # Only a tag publishes, and only once every build has succeeded, so a
+    # release never goes out with one platform missing.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Fetches every branch and tag, which git-cliff needs for the
+          # changelog.
+          fetch-depth: 0
+
       # A release's notes are scoped by the tag before this one, and for the
       # first fork build that is an upstream release. Upstream's tags are not
       # kept in this fork, so that its tag list shows fork releases alone and no
@@ -155,17 +310,17 @@ jobs:
       # unrelated commits still means the right thing to git-cliff: everything
       # this build has that the previous one did not.
       #
-      # The first release of a line has no earlier build to compare to, so it falls
-      # back to the nearest upstream tag it descends from. That is not always
-      # the newest upstream release: zellij cuts its `chore(release)` commit on
-      # a release branch rather than on main, so a released version's tag is
-      # usually not an ancestor of anything here. The first build therefore
-      # reaches back to the last tag that is, and lists rather more than one
-      # release's worth of upstream work. It affects that build alone.
+      # The first release of a line has no earlier build to compare to, so it
+      # falls back to the nearest upstream tag it descends from. That is not
+      # always the newest upstream release: zellij cuts its `chore(release)`
+      # commit on a release branch rather than on main, so a released version's
+      # tag is usually not an ancestor of anything here. The first build
+      # therefore reaches back to the last tag that is, and lists rather more
+      # than one release's worth of upstream work. It affects that build alone.
       - name: Work out which commits are new
         id: range
         env:
-          PREFIX: ${{ steps.line.outputs.prefix }}
+          PREFIX: ${{ needs.verify.outputs.prefix }}
         run: |
           set -euo pipefail
           current="${GITHUB_REF#refs/tags/}"
@@ -184,47 +339,12 @@ jobs:
             echo "args=-vv --strip header --latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+      - name: Collect the builds
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Mirrors upstream's release job. `cross` does the musl link inside a
-      # container, but keeping this here means a fallback to a host build has
-      # what it needs rather than failing halfway through a release.
-      - name: Install musl-tools
-        run: sudo apt-get install -y --no-install-recommends musl-tools
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          rustflags: ""
-
-      # Builds the wasm plugins natively, then links the binary for musl through
-      # `cross`. This is the same command upstream's release.yml uses for its
-      # own x86_64 musl artifact, web support included.
-      - name: Build release binary
-        run: cargo xtask ci cross x86_64-unknown-linux-musl
-
-      # Named exactly as upstream names its own musl artifact, so this build
-      # drops into anything that already knows how to unpack one. The release
-      # notes are what say where it came from.
-      - name: Create artifact
-        run: |
-          set -euo pipefail
-          tar cvzf zellij-x86_64-unknown-linux-musl.tar.gz \
-            -C target/x86_64-unknown-linux-musl/release zellij
-
-      # Covers the tarball, under its bare name, so a reader who has downloaded
-      # both files can run `sha256sum -c` in the directory they landed in.
-      # Upstream instead hashes the unpacked binary at its full build path,
-      # which names a file the reader does not have at a path that does not
-      # exist on their machine.
-      - name: Create checksum
-        run: |
-          set -euo pipefail
-          sha256sum zellij-x86_64-unknown-linux-musl.tar.gz \
-            > zellij-x86_64-unknown-linux-musl.sha256sum
+          pattern: zellij-*
+          path: dist
+          merge-multiple: true
 
       - name: Generate a changelog
         uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
@@ -244,7 +364,7 @@ jobs:
       # has to say plainly whose build this is and exactly what went into it.
       - name: Compose release notes
         env:
-          BRANCH: ${{ steps.line.outputs.branch }}
+          BRANCH: ${{ needs.verify.outputs.branch }}
         run: |
           set -euo pipefail
           {
@@ -255,7 +375,7 @@ jobs:
             echo "| Tag | \`${GITHUB_REF#refs/tags/}\` |"
             echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
-            echo "| Target | \`x86_64-unknown-linux-musl\` |"
+            echo "| Targets | \`x86_64-unknown-linux-musl\`, \`x86_64-pc-windows-msvc\` |"
             echo
             cat CHANGES.md
           } > RELEASE_NOTES.md
@@ -273,6 +393,9 @@ jobs:
           # release page.
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
-            zellij-x86_64-unknown-linux-musl.tar.gz
-            zellij-x86_64-unknown-linux-musl.sha256sum
+            dist/zellij-x86_64-unknown-linux-musl.tar.gz
+            dist/zellij-x86_64-unknown-linux-musl.sha256sum
+            dist/zellij-x86_64-pc-windows-msvc.zip
+            dist/zellij-x86_64-pc-windows-msvc.sha256sum
