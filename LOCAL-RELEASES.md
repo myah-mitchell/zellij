@@ -241,12 +241,22 @@ Both lines publish the same artifact names, so the tag on the release page is
 what tells them apart.
 
 The workflow checks the tag, runs the tests on Linux and on Windows, and only if
-both pass builds two binaries:
+both pass builds these binaries:
 
-| Target | Built with | Published as |
-|---|---|---|
-| `x86_64-unknown-linux-musl` | `cargo xtask ci cross` on Linux | `zellij-x86_64-unknown-linux-musl.tar.gz` |
-| `x86_64-pc-windows-msvc` | `cargo xtask ci build-release` on Windows | `zellij-x86_64-pc-windows-msvc.zip` |
+| Target | Built with | Published as | Lines |
+|---|---|---|---|
+| `x86_64-unknown-linux-musl` | `cargo xtask ci cross` on Linux | `zellij-x86_64-unknown-linux-musl.tar.gz` | both |
+| `x86_64-unknown-linux-gnu` | `cargo xtask ci build-release` on Linux | `zellij-x86_64-unknown-linux-gnu.tar.gz` | `window-v` |
+| `x86_64-pc-windows-msvc` | `cargo xtask ci build-release` on Windows | `zellij-x86_64-pc-windows-msvc.zip` | both |
+
+The glibc build exists for `zellij window`. The musl build is fully static, and
+a static musl binary cannot load shared libraries at runtime, so its window
+fails with "The wayland library could not be loaded" on every machine. The
+glibc build links dynamically and loads Wayland or X11 from the system, which
+under WSL2 means WSLg. It is built on `ubuntu-latest` and needs that runner's
+glibc or newer. The workflow adds it whenever the commit's `Cargo.toml` has the
+`window` feature, rather than going by the tag prefix, so a manual run of any
+branch builds what a release of it would.
 
 Each comes with a matching `.sha256sum`. These are the same commands and
 targets upstream uses for its own artifacts. Windows cannot be cross-compiled
@@ -276,7 +286,7 @@ tags and upstream's sit on branches that diverged, so ordering them by date
 interleaves them, and a release would re-list everything the one before it
 already shipped.
 
-Only those two targets are built. Upstream's release covers six targets in both
+Only those targets are built. Upstream's release covers six targets in both
 web and no-web variants plus a Windows MSI installer, which is a long and
 expensive run for builds you install on a couple of machines. The MSI is left
 out on purpose: it uses upstream's product codes, so installing it would replace
