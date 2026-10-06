@@ -1317,6 +1317,16 @@ fn apply_node_list_edits<T>(
     edits: &[ListEdit<T>],
     make_node: impl Fn(&T) -> Option<KdlNode>,
 ) {
+    edit_node_list(block, owner_indent, edits, make_node, |_, _, _| false);
+}
+
+fn edit_node_list<T>(
+    block: &mut KdlDocument,
+    owner_indent: Option<&str>,
+    edits: &[ListEdit<T>],
+    make_node: impl Fn(&T) -> Option<KdlNode>,
+    edit_in_place: impl Fn(&mut KdlNode, &T, &str) -> bool,
+) {
     let indent = child_indent(block, owner_indent);
     for edit in edits {
         match edit {
@@ -1327,6 +1337,10 @@ fn apply_node_list_edits<T>(
             },
             ListEdit::Replace { index, item } => {
                 if *index < block.nodes().len() {
+                    let node_indent_text = node_indent(block, *index, owner_indent);
+                    if edit_in_place(&mut block.nodes_mut()[*index], item, &node_indent_text) {
+                        continue;
+                    }
                     if let Some(node) = make_node(item) {
                         replace_node_at(block, *index, node);
                     }
@@ -1494,13 +1508,19 @@ fn is_single_argument(node: &KdlNode) -> bool {
 }
 
 fn plugin_child_value(name: &str, old: Option<&KdlValue>, value: &str) -> KdlValue {
+    if name == "cwd" {
+        return KdlValue::String(value.to_owned());
+    }
     match value.parse::<i64>() {
-        _ if name == "cwd" => KdlValue::String(value.to_owned()),
         Ok(number) if old.is_some_and(KdlValue::is_i64_value) && number.to_string() == value => {
             KdlValue::Base10(number)
         },
         _ => config_value(value),
     }
+}
+
+fn node_cwd(node: &KdlNode) -> Option<&str> {
+    crate::kdl_get_string_property_or_child_value!(node, "cwd")
 }
 
 fn edit_plugin_children(node: &mut KdlNode, plugin: &PluginEntry, owner_indent: &str) -> bool {
@@ -1516,14 +1536,11 @@ fn edit_plugin_children(node: &mut KdlNode, plugin: &PluginEntry, owner_indent: 
     };
     let mut current = PluginUserConfiguration::new(configuration).inner().clone();
     let mut children = node.children().cloned().unwrap_or_default();
+    let one_line = node.children().is_some() && !children.to_string().contains('\n');
     if children.get("location").is_some() {
         return false;
     }
-    if let Some(cwd) = children
-        .get("cwd")
-        .and_then(|cwd| cwd.get(0))
-        .and_then(|entry| entry.value().as_string())
-    {
+    if let Some(cwd) = node_cwd(node) {
         current.insert("cwd".to_owned(), cwd.to_owned());
     }
     let mut wanted: BTreeMap<String, String> = plugin.configuration.iter().cloned().collect();
@@ -1555,16 +1572,13 @@ fn edit_plugin_children(node: &mut KdlNode, plugin: &PluginEntry, owner_indent: 
                 let value = plugin_child_value(&name, Some(child.entries()[0].value()), value);
                 set_first_argument(child, value);
             },
+            (Some(_), None) if one_line => return false,
             (Some(value), None) => {
                 let mut child = KdlNode::new(name.as_str());
                 child.push(KdlEntry::new(plugin_child_value(&name, None, value)));
                 push_node(&mut children, child, &indent, Some(owner_indent));
             },
-            (None, _) => {
-                for position in positions.into_iter().rev() {
-                    remove_node_at(&mut children, position);
-                }
-            },
+            (None, _) => remove_nodes_named(&mut children, &name),
         }
     }
     if node.children().is_none() && !children.nodes().is_empty() {
@@ -1663,22 +1677,16 @@ fn apply_load_plugins_edit(
     let rebased = rebased_list_edits(base, edits, slots, |entry: &PluginEntry| {
         entry.location.clone()
     });
-    for edit in &rebased {
-        if let ListEdit::Replace { index, item } = edit {
-            if *index < block.nodes().len() {
-                let node_indent_text = node_indent(block, *index, Some(&indent));
-                let node = &mut block.nodes_mut()[*index];
-                if same_plugin_location(node_name(node), &item.location)
-                    && edit_plugin_children(node, item, &node_indent_text)
-                {
-                    continue;
-                }
-            }
-        }
-        apply_node_list_edits(block, Some(&indent), std::slice::from_ref(edit), |entry| {
-            Some(load_plugin_node(entry))
-        });
-    }
+    edit_node_list(
+        block,
+        Some(&indent),
+        &rebased,
+        |entry| Some(load_plugin_node(entry)),
+        |node, entry, indent| {
+            same_plugin_location(node_name(node), &entry.location)
+                && edit_plugin_children(node, entry, indent)
+        },
+    );
 }
 
 fn apply_env_edit(document: &mut KdlDocument, name: &str, value: Option<&str>) {

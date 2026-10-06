@@ -1308,3 +1308,26 @@ fn a_load_plugins_entry_with_a_changed_option_is_edited_in_place() {
     });
     assert_eq!(text, file.replace("a \"1\"", "a \"9\""));
 }
+
+#[test]
+fn a_swapped_load_plugins_entry_keeps_the_block_indentation() {
+    let file = "load_plugins {\n  \"zellij:strider\"\n}\n";
+    let text = saved_text_after(file, |saved| {
+        let mut runtime = saved.clone();
+        runtime.background_plugins = load("load_plugins { \"zellij:about\"; }").background_plugins;
+        runtime
+    });
+    assert_eq!(text, "load_plugins {\n  \"zellij:about\"\n}\n");
+}
+
+#[test]
+fn an_option_added_to_a_one_line_alias_block_replaces_the_alias() {
+    let file = "plugins {\n    my-plugin location=\"zellij:strider\" { a \"1\"; }\n}\n";
+    let text = saved_text_after(file, |saved| {
+        with_alias_option(saved, "my-plugin", "b", Some("2"))
+    });
+    assert_eq!(
+        text,
+        "plugins {\n    my-plugin location=\"zellij:strider\" {\n        a \"1\"\n        b \"2\"\n    }\n}\n"
+    );
+}
