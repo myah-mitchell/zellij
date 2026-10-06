@@ -8,8 +8,8 @@ use strum::IntoEnumIterator;
 use super::actions::Action;
 use super::config::Config;
 use super::config_blocks::{
-    config_blocks, env_node, load_plugin_entry, load_plugin_node, menu_entries, menu_item_node,
-    plugin_alias_node, styling_colours, theme_node, theme_slots,
+    config_blocks, config_value, env_node, load_plugin_entry, load_plugin_node, menu_entries,
+    menu_item_node, plugin_alias_node, styling_colours, theme_node, theme_slots,
 };
 use super::config_settings::{
     copy_setting, default_config, differing_settings, setting_is_default, setting_kdl_values,
@@ -20,11 +20,13 @@ use super::context_menu::{
 };
 use super::keybind_presets::{KeybindChanges, KeybindsSelection, LEADER_PLACEHOLDERS};
 use super::keybinds::Keybinds;
+use super::layout::{PluginUserConfiguration, RunPluginLocation};
 use super::options::Options;
 use crate::data::{
     ConfigBlocks, InputMode, KeyWithModifier, MenuItemEntry, PluginAliasEntry, PluginEntry,
     SettingKey, ThemeEntry,
 };
+use crate::kdl::parse_plugin_user_configuration;
 
 const KEYBINDS: &str = "keybinds";
 const MOUSEBINDS: &str = "mousebinds";
@@ -1425,11 +1427,22 @@ fn remove_empty_top_level_blocks(document: &mut KdlDocument, name: &str) {
 }
 
 fn set_named_node(document: &mut KdlDocument, block_name: &str, name: &str, node: Option<KdlNode>) {
+    edit_named_node(document, block_name, name, node, |_, _| false);
+}
+
+fn edit_named_node(
+    document: &mut KdlDocument,
+    block_name: &str,
+    name: &str,
+    node: Option<KdlNode>,
+    edit_in_place: impl Fn(&mut KdlNode, &str) -> bool,
+) {
     let mut placed = false;
     for block in document.nodes_mut() {
         if node_name(block) != block_name {
             continue;
         }
+        let block_indent = indent_of_leading(block.leading());
         let Some(children) = block.children_mut().as_mut() else {
             continue;
         };
@@ -1443,7 +1456,10 @@ fn set_named_node(document: &mut KdlDocument, block_name: &str, name: &str, node
         for position in positions.into_iter().rev() {
             match &node {
                 Some(node) if !placed && position == first_position(children, name) => {
-                    replace_node_at(children, position, node.clone());
+                    let indent = node_indent(children, position, block_indent.as_deref());
+                    if !edit_in_place(&mut children.nodes_mut()[position], &indent) {
+                        replace_node_at(children, position, node.clone());
+                    }
                     placed = true;
                 },
                 _ => remove_node_at(children, position),
@@ -1464,6 +1480,121 @@ fn first_position(document: &KdlDocument, name: &str) -> usize {
         .iter()
         .position(|n| node_name(n) == name)
         .unwrap_or(usize::MAX)
+}
+
+fn same_plugin_location(text: &str, location: &str) -> bool {
+    text == location
+        || RunPluginLocation::parse(text, None)
+            .map(|parsed| parsed.display() == location)
+            .unwrap_or(false)
+}
+
+fn is_single_argument(node: &KdlNode) -> bool {
+    node.children().is_none() && node.entries().len() == 1 && node.entries()[0].name().is_none()
+}
+
+fn plugin_child_value(name: &str, old: Option<&KdlValue>, value: &str) -> KdlValue {
+    match value.parse::<i64>() {
+        _ if name == "cwd" => KdlValue::String(value.to_owned()),
+        Ok(number) if old.is_some_and(KdlValue::is_i64_value) && number.to_string() == value => {
+            KdlValue::Base10(number)
+        },
+        _ => config_value(value),
+    }
+}
+
+fn edit_plugin_children(node: &mut KdlNode, plugin: &PluginEntry, owner_indent: &str) -> bool {
+    if node
+        .entries()
+        .iter()
+        .any(|entry| property_name(entry) != Some("location"))
+    {
+        return false;
+    }
+    let Ok(configuration) = parse_plugin_user_configuration(node) else {
+        return false;
+    };
+    let mut current = PluginUserConfiguration::new(configuration).inner().clone();
+    let mut children = node.children().cloned().unwrap_or_default();
+    if children.get("location").is_some() {
+        return false;
+    }
+    if let Some(cwd) = children
+        .get("cwd")
+        .and_then(|cwd| cwd.get(0))
+        .and_then(|entry| entry.value().as_string())
+    {
+        current.insert("cwd".to_owned(), cwd.to_owned());
+    }
+    let mut wanted: BTreeMap<String, String> = plugin.configuration.iter().cloned().collect();
+    if let Some(cwd) = &plugin.cwd {
+        wanted.insert("cwd".to_owned(), cwd.clone());
+    }
+    let names: BTreeSet<String> = current.keys().chain(wanted.keys()).cloned().collect();
+    let indent = child_indent(&children, Some(owner_indent));
+    for name in names {
+        let positions: Vec<usize> = children
+            .nodes()
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| node_name(child) == name)
+            .map(|(position, _)| position)
+            .collect();
+        let read_position = if name == "cwd" {
+            positions.first()
+        } else {
+            positions.last()
+        };
+        match (wanted.get(&name), read_position) {
+            (Some(value), _) if current.get(&name) == Some(value) => {},
+            (Some(value), Some(&position)) => {
+                let child = &mut children.nodes_mut()[position];
+                if !is_single_argument(child) {
+                    return false;
+                }
+                let value = plugin_child_value(&name, Some(child.entries()[0].value()), value);
+                set_first_argument(child, value);
+            },
+            (Some(value), None) => {
+                let mut child = KdlNode::new(name.as_str());
+                child.push(KdlEntry::new(plugin_child_value(&name, None, value)));
+                push_node(&mut children, child, &indent, Some(owner_indent));
+            },
+            (None, _) => {
+                for position in positions.into_iter().rev() {
+                    remove_node_at(&mut children, position);
+                }
+            },
+        }
+    }
+    if node.children().is_none() && !children.nodes().is_empty() {
+        node.set_before_children(" ");
+    }
+    if node.children().is_some() || !children.nodes().is_empty() {
+        node.set_children(children);
+    }
+    true
+}
+
+fn edit_plugin_alias_in_place(node: &mut KdlNode, alias: &PluginAliasEntry, indent: &str) -> bool {
+    let Some(location_changed) = node
+        .get("location")
+        .and_then(|entry| entry.value().as_string())
+        .map(|location| !same_plugin_location(location, &alias.plugin.location))
+    else {
+        return false;
+    };
+    if !edit_plugin_children(node, &alias.plugin, indent) {
+        return false;
+    }
+    if location_changed {
+        set_property(
+            node,
+            "location",
+            Some(KdlValue::String(alias.plugin.location.clone())),
+        );
+    }
+    true
 }
 
 fn node_plugin_entry(node: &KdlNode, name_is_location: bool) -> PluginEntry {
@@ -1532,9 +1663,22 @@ fn apply_load_plugins_edit(
     let rebased = rebased_list_edits(base, edits, slots, |entry: &PluginEntry| {
         entry.location.clone()
     });
-    apply_node_list_edits(block, Some(&indent), &rebased, |entry| {
-        Some(load_plugin_node(entry))
-    });
+    for edit in &rebased {
+        if let ListEdit::Replace { index, item } = edit {
+            if *index < block.nodes().len() {
+                let node_indent_text = node_indent(block, *index, Some(&indent));
+                let node = &mut block.nodes_mut()[*index];
+                if same_plugin_location(node_name(node), &item.location)
+                    && edit_plugin_children(node, item, &node_indent_text)
+                {
+                    continue;
+                }
+            }
+        }
+        apply_node_list_edits(block, Some(&indent), std::slice::from_ref(edit), |entry| {
+            Some(load_plugin_node(entry))
+        });
+    }
 }
 
 fn apply_env_edit(document: &mut KdlDocument, name: &str, value: Option<&str>) {
@@ -2115,11 +2259,16 @@ fn apply_mousebinds_edit(document: &mut KdlDocument, text: Option<&str>) {
 fn apply_block_edit(document: &mut KdlDocument, edit: &ConfigEdit) {
     match edit {
         ConfigEdit::MousebindsBlock(text) => apply_mousebinds_edit(document, text.as_deref()),
-        ConfigEdit::PluginAlias { name, alias } => set_named_node(
+        ConfigEdit::PluginAlias { name, alias } => edit_named_node(
             document,
             PLUGINS,
             name,
             alias.as_ref().map(plugin_alias_node),
+            |node, indent| {
+                alias
+                    .as_ref()
+                    .is_some_and(|alias| edit_plugin_alias_in_place(node, alias, indent))
+            },
         ),
         ConfigEdit::LoadPlugins { base, edits } => apply_load_plugins_edit(document, base, edits),
         ConfigEdit::EnvVar { name, value } => apply_env_edit(document, name, value.as_deref()),
