@@ -1,5 +1,5 @@
 ---
-# Fast-forwards this fork's main to zellij-org/zellij, once a day, and does
+# Fast-forwards this fork's main to zellij-org/zellij, once a week, and does
 # nothing else. Keeping main byte-identical to upstream is what makes a pull
 # request from a branch cut off it show only the change it proposes.
 #
@@ -22,11 +22,20 @@
 # that can conflict, precisely when upstream lands a change the fork already
 # carries, so it stays a decision rather than a 6am job that fails until
 # someone intervenes. The summary says when it has fallen behind.
+#
+# Weekly rather than daily, because main only has to be current when something
+# is cut from it. A build that needs upstream's latest calls this workflow as
+# its first job (`uses: ./.github/workflows/sync-upstream.yml` with
+# `secrets: inherit`) instead of trusting a week-old main. The weekly run keeps
+# main from drifting far in between, so a pull request cut from it never starts
+# a long way behind upstream.
 name: Sync upstream
 on:
   schedule:
-    - cron: "0 6 * * *"
+    # Mondays, 06:00 UTC.
+    - cron: "0 6 * * 1"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write # fast-forward main
