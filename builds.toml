@@ -46,4 +46,4 @@ targets = ["linux-musl"]
 tag = "fork-v{version}"
 version = "0.46.3"
 base = "upstream:main"
-stack = []
+stack = ["feat/config-alias-per-key-edit"]
