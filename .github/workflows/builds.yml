@@ -1,0 +1,444 @@
+---
+# Builds and releases what builds.toml describes. See README.md.
+#
+#   push to builds.toml   builds every [build.*] table that changed, and
+#                         publishes it
+#   Run workflow          builds the named tables (or all), and publishes only
+#                         when asked to, so a stack can be tried without
+#                         spending a version on it
+#
+# The jobs, in order:
+#
+#   sync      fast-forwards main, so it is current whenever something is built
+#   plan      works out which builds this run makes
+#   assemble  merges each build's stack onto its base with tooling/builds.py,
+#             pushes the result to build/<name>, and picks its tag
+#   build     for each build and target: tests, compiles, keeps the archive
+#   publish   for each build whose archives all exist: tags and releases it
+#
+# Builds are independent of each other from assemble on. One that fails to
+# merge, test or compile is reported and left out, and the rest still publish.
+name: Builds
+on:
+  push:
+    branches: [fork-tooling]
+    paths: [builds.toml]
+  workflow_dispatch:
+    inputs:
+      builds:
+        description: "Builds to make: names from builds.toml, comma-separated, or all"
+        type: string
+        default: all
+      publish:
+        description: "Publish releases. Off, the run tests and compiles and keeps the archives on the run page."
+        type: boolean
+        default: false
+
+# One run at a time, queued rather than cancelled: two runs racing would both
+# try to take the same date tag, and a cancelled run can leave a build branch
+# pointing at something nothing was released from.
+concurrency:
+  group: builds
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  sync:
+    name: sync
+    uses: ./.github/workflows/sync-upstream.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      names: ${{ steps.plan.outputs.names }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Work out which builds to make
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          ONLY: ${{ inputs.builds }}
+        run: |
+          set -euo pipefail
+          # The config as it was before this push, to compare against. Absent
+          # when the push created the branch, which then counts every build as
+          # changed.
+          if [[ "${EVENT}" == "push" && -n "${BEFORE//0/}" ]]; then
+            git fetch --quiet --depth=1 origin "${BEFORE}" || true
+          fi
+          names="$(python3 -I tooling/builds.py plan --event "${EVENT}" --before "${BEFORE}" --only "${ONLY:-all}")"
+          echo "names=${names}" >> "$GITHUB_OUTPUT"
+
+  assemble:
+    name: assemble
+    needs: [sync, plan]
+    # A failed sync leaves main behind, but builds take their base straight
+    # from upstream, so they go ahead regardless.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.names != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      builds: ${{ steps.assemble.outputs.builds }}
+      publish: ${{ steps.assemble.outputs.publish }}
+    steps:
+      # The built-in token may not push commits that touch .github/workflows/,
+      # and every upstream commit carries upstream's workflows. The app's token
+      # can. See README.md.
+      - name: Mint an app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      # Full history of every branch, so the upstream fetch below only brings
+      # what main does not already have, and nothing pushed from here is cut
+      # off at a shallow boundary.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      # Assembled in this checkout, which is fork-tooling: builds.py fetches
+      # every base and stack ref under refs/fork-builds/ and merges in a
+      # worktree, so the tooling files never mix with zellij's.
+      - name: Assemble the stacks
+        id: assemble
+        env:
+          NAMES: ${{ needs.plan.outputs.names }}
+          PUBLISH: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
+          GIT_AUTHOR_NAME: zellij fork builds
+          GIT_AUTHOR_EMAIL: 41898283+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: zellij fork builds
+          GIT_COMMITTER_EMAIL: 41898283+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/zellij-org/zellij.git
+          mkdir -p "${RUNNER_TEMP}/builds"
+          failed=()
+          summary="${GITHUB_STEP_SUMMARY}"
+          { echo "## Builds"; echo; } >> "${summary}"
+
+          for name in $(jq -r '.[]' <<<"${NAMES}"); do
+            echo "::group::${name}"
+            out="${RUNNER_TEMP}/builds/${name}.json"
+            if ! python3 -I tooling/builds.py assemble "${name}" --repo . \
+                --worktree "${RUNNER_TEMP}/wt-${name}" > "${out}"; then
+              echo "::endgroup::"
+              echo "::error::${name} could not be assembled; see the log above."
+              echo "- **${name}**: did not assemble; the log of this step says why" >> "${summary}"
+              failed+=("${name}")
+              rm -f "${out}"
+              continue
+            fi
+            skip="$(jq -r .skip "${out}")"
+            if [[ -n "${skip}" ]]; then
+              echo "::endgroup::"
+              echo "::warning::${name}: ${skip}"
+              echo "- **${name}**: skipped, ${skip}" >> "${summary}"
+              rm -f "${out}"
+              continue
+            fi
+            # Kept as a branch so what was built can be checked out and run, and
+            # so the build jobs below can fetch it. Rewritten on every build.
+            sha="$(jq -r .sha "${out}")"
+            git push --quiet --force origin "${sha}:refs/heads/build/${name}"
+            echo "::endgroup::"
+            echo "::notice::${name}: $(jq -r .tag "${out}") from ${sha:0:9}, on build/${name}"
+            {
+              echo "- **${name}**: \`$(jq -r .tag "${out}")\` from \`${sha:0:9}\` on \`build/${name}\`"
+              jq -r '.stack[] | select(.merged | not) | "  - `\(.ref)` is already in the base and can be dropped from the stack"' "${out}"
+            } >> "${summary}"
+          done
+
+          shopt -s nullglob
+          results=("${RUNNER_TEMP}"/builds/*.json)
+          builds='[]'
+          if (( ${#results[@]} )); then
+            builds="$(jq -cs '[.[] | del(.worktree)]' "${results[@]}")"
+          fi
+          if [[ "${PUBLISH}" == "true" ]]; then
+            publish="$(jq -c '[.[] | select(.publish)]' <<<"${builds}")"
+          else
+            publish='[]'
+          fi
+          echo "builds=${builds}" >> "$GITHUB_OUTPUT"
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+
+          if (( ${#failed[@]} )); then
+            echo "::error::Not assembled: ${failed[*]}. The other builds carry on."
+            exit 1
+          fi
+
+  # Each job tests the platform it builds for, then compiles, then keeps the
+  # archive. An archive therefore exists only if its tests and build passed,
+  # and that is what publish checks: one build failing never holds back
+  # another, which a separate test job could not promise, since a job that
+  # needs a matrix waits on all of it.
+  #
+  # Tests are what upstream's rust.yml runs: everything on Linux, and on
+  # Windows the library tests of the three crates upstream keeps passing there.
+  # The glibc build shares the musl build's Linux tests rather than repeating
+  # them, and publish requires both.
+  build:
+    name: ${{ matrix.build.name }} (${{ matrix.target.name }})
+    needs: assemble
+    if: ${{ !cancelled() && needs.assemble.outputs.builds != '' && needs.assemble.outputs.builds != '[]' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.assemble.outputs.builds) }}
+        target:
+          # Fully static, so it runs on any Linux. It cannot load shared
+          # libraries, so `zellij window` cannot open a window from it.
+          - name: linux-musl
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-musl
+            bin: target/x86_64-unknown-linux-musl/release
+          # Linked dynamically against glibc, so the window can load the
+          # system's Wayland or X11 libraries (WSLg under WSL2). Needs
+          # ubuntu-latest's glibc or newer.
+          - name: linux-gnu
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            bin: target/release
+          - name: windows
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            bin: target/release
+    runs-on: ${{ matrix.target.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.build.sha }}
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upstream's release does the same for musl. `cross` links inside a
+      # container, but a fallback to a host build then has what it needs.
+      - name: Install musl-tools
+        if: matrix.target.name == 'linux-musl'
+        run: sudo apt-get install -y --no-install-recommends musl-tools
+
+      # A dependency assembles part of itself with NASM when built for MSVC.
+      - name: Install NASM
+        if: matrix.target.name == 'windows'
+        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      # rust-toolchain.toml in the build pins the channel and targets.
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+
+      - name: Test
+        if: matrix.target.name == 'linux-musl'
+        run: cargo xtask test
+
+      - name: Test
+        if: matrix.target.name == 'windows'
+        run: |
+          cargo test --no-default-features -p zellij-utils --lib
+          cargo test --no-default-features -p zellij-server --lib
+          cargo test --no-default-features -p zellij-client --lib
+
+      # The commands upstream's release.yml uses for the same targets.
+      - name: Build
+        if: matrix.target.name == 'linux-musl'
+        run: cargo xtask ci cross x86_64-unknown-linux-musl
+
+      - name: Build
+        if: matrix.target.name == 'linux-gnu'
+        run: cargo xtask ci build-release
+
+      # crt-static links the C runtime in, so zellij.exe runs without the
+      # Visual C++ redistributable installed.
+      - name: Build
+        if: matrix.target.name == 'windows'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo xtask ci build-release
+
+      # Named as upstream names its own archives, so they drop into anything
+      # that already unpacks a zellij release.
+      - name: Archive
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir dist
+          tar cvzf "dist/zellij-${{ matrix.target.triple }}.tar.gz" -C "${{ matrix.target.bin }}" zellij
+
+      # zellij-window.exe is the windowed launcher, which opens the window
+      # without a console behind it. Included when the build has one, as
+      # upstream's release does.
+      - name: Archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $files = @("${{ matrix.target.bin }}/zellij.exe")
+          if (Test-Path "${{ matrix.target.bin }}/zellij-window.exe") {
+            $files += "${{ matrix.target.bin }}/zellij-window.exe"
+          }
+          Compress-Archive -Path $files -DestinationPath "dist/zellij-${{ matrix.target.triple }}.zip"
+
+      # Hashes the archive under its bare name, so `sha256sum -c` works in the
+      # directory both downloads landed in. Upstream hashes the unpacked
+      # binary at its build path instead.
+      - name: Checksum
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum zellij-${{ matrix.target.triple }}.* > "zellij-${{ matrix.target.triple }}.sha256sum"
+          cat "zellij-${{ matrix.target.triple }}.sha256sum"
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.build.name }}--zellij-${{ matrix.target.triple }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: publish ${{ matrix.build.name }}
+    needs: [assemble, build]
+    if: ${{ !cancelled() && needs.assemble.outputs.publish != '' && needs.assemble.outputs.publish != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.assemble.outputs.publish) }}
+    steps:
+      - name: Collect the archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ matrix.build.name }}--*
+          path: dist
+          merge-multiple: true
+
+      # Never publish a release with a platform missing.
+      - name: Check every target built
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in zellij-x86_64-unknown-linux-musl.tar.gz zellij-x86_64-unknown-linux-gnu.tar.gz \
+                   zellij-x86_64-pc-windows-msvc.zip; do
+            [[ -f "${f}" ]] || { echo "::error::${f} is missing: its tests or build failed."; missing=1; }
+          done
+          exit "${missing}"
+
+      - name: Mint an app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      # The tooling, for cliff-fork.toml, and the build itself with its full
+      # history, for the changelog.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tooling
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.build.sha }}
+          path: src
+          fetch-depth: 0
+
+      # The notes cover what changed since the previous release in the same
+      # series: the newest tag with this build's prefix. A series' first
+      # release has none, and falls back to the nearest upstream release tag
+      # the build descends from. Upstream's tags are not kept in this fork, so
+      # they are fetched into the runner for this and pushed nowhere.
+      - name: Work out which commits are new
+        id: range
+        working-directory: src
+        env:
+          PREFIX: ${{ matrix.build.prefix }}
+          SHA: ${{ matrix.build.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags https://github.com/zellij-org/zellij.git "+refs/tags/*:refs/tags/*"
+          previous="$(git tag --list "${PREFIX}*" --sort=-version:refname | head -n1)"
+          if [[ -z "${previous}" ]]; then
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "${SHA}" 2>/dev/null || true)"
+          fi
+          if [[ -n "${previous}" ]]; then
+            echo "::notice::Release notes cover ${previous}..${SHA:0:9}."
+            echo "range=${previous}..${SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=${SHA}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "previous=${previous}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4.9.0
+        with:
+          config: tooling/cliff-fork.toml
+          version: "v2.14.1"
+          args: -vv --strip header --repository src --tag ${{ matrix.build.tag }} ${{ steps.range.outputs.range }}
+        env:
+          OUTPUT: CHANGES.md
+
+      # The release page is all a reader sees, so it says plainly whose build
+      # this is and exactly what went into it. The comment at the end records
+      # the inputs, so a later run can tell whether anything has moved since.
+      - name: Compose release notes
+        env:
+          BUILD: ${{ toJSON(matrix.build) }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Fork build \`$(jq -r .name <<<"${BUILD}")\` of [zellij](https://github.com/zellij-org/zellij). Not an upstream release."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Base | \`$(jq -r .base.ref <<<"${BUILD}")\` at \`$(jq -r '.base.sha[:9]' <<<"${BUILD}")\` |"
+            jq -r '.stack[] | "| Stacked | `\(.ref)` at `\(.sha[:9])`\(if .merged then "" else " (already in the base)" end) |"' <<<"${BUILD}"
+            echo "| Commit | \`$(jq -r '.sha[:9]' <<<"${BUILD}")\` on \`build/$(jq -r .name <<<"${BUILD}")\` |"
+            echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+            echo "| Targets | \`x86_64-unknown-linux-musl\`, \`x86_64-unknown-linux-gnu\`, \`x86_64-pc-windows-msvc\` |"
+            echo
+            echo "Use the \`linux-gnu\` build for \`zellij window\`. The \`musl\` build is static and cannot open a window."
+            echo
+            cat CHANGES.md
+            echo
+            echo "<!-- fork-build-inputs $(jq -c '{base: .base.sha, stack: [.stack[].sha]}' <<<"${BUILD}") -->"
+          } > RELEASE_NOTES.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          tag_name: ${{ matrix.build.tag }}
+          target_commitish: ${{ matrix.build.sha }}
+          name: ${{ matrix.build.tag }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ matrix.build.prerelease }}
+          # A nightly never displaces the fork release as the one GitHub shows
+          # as latest.
+          make_latest: ${{ !matrix.build.prerelease }}
+          fail_on_unmatched_files: true
+          files: dist/zellij-*

@@ -5,8 +5,8 @@
 #
 # Upstream's tags are deliberately not copied here. A fork release's notes need
 # the tag before them to know which commits are new, and for the first release
-# that is an upstream tag, but release-local.yml fetches those from upstream
-# when it builds, into the runner and nowhere else. Nothing is stored, so this
+# that is an upstream tag, but builds.yml fetches those from upstream when it
+# publishes, into the runner and nowhere else. Nothing is stored, so this
 # fork's tag list shows its own releases alone and no v*.*.* tag ever exists
 # here for the inherited release.yml to fire on.
 #
@@ -18,15 +18,9 @@
 # An app token, unlike the built-in one, does start workflow runs, so a sync
 # that moves main also starts the inherited rust.yml against upstream's commits.
 #
-# main-local is deliberately left alone. Merging main into it is the one step
-# that can conflict, precisely when upstream lands a change the fork already
-# carries, so it stays a decision rather than a 6am job that fails until
-# someone intervenes. The summary says when it has fallen behind.
-#
 # Weekly rather than daily, because main only has to be current when something
-# is cut from it. A build that needs upstream's latest calls this workflow as
-# its first job (`uses: ./.github/workflows/sync-upstream.yml` with
-# `secrets: inherit`) instead of trusting a week-old main. The weekly run keeps
+# is cut from it. builds.yml calls this workflow as its first job, so every
+# build run also brings main up to date. The weekly run keeps
 # main from drifting far in between, so a pull request cut from it never starts
 # a long way behind upstream.
 name: Sync upstream
@@ -101,7 +95,7 @@ jobs:
           fi
 
           if ! git merge-base --is-ancestor "${before}" "${after}"; then
-            echo "::error::origin/main (${before:0:7}) is not an ancestor of upstream/main (${after:0:7}), so this is not a fast-forward. Something has been committed to main that upstream does not have; move it to main-local and reset main to upstream/main."
+            echo "::error::origin/main (${before:0:7}) is not an ancestor of upstream/main (${after:0:7}), so this is not a fast-forward. Something has been committed to main that upstream does not have; move it to a branch of its own and reset main to upstream/main."
             exit 1
           fi
 
@@ -117,8 +111,7 @@ jobs:
             echo "count=$(git rev-list --count "${before}..${after}")"
           } >> "$GITHUB_OUTPUT"
 
-      # main-local is not touched by this job, so whoever reads the run needs to
-      # be told when it has work waiting.
+      # Says on the run's page what happened to main.
       - name: Report
         # Runs even when a step above failed, since a run that stopped early is
         # exactly when a reader needs to be told what state the fork is in.
@@ -145,23 +138,5 @@ jobs:
               echo "- **main**: already current"
             else
               echo "- **main**: not synced, the step above did not finish"
-            fi
-
-            echo
-            # Checked before it is used: a summary that stops halfway is worst
-            # exactly when the run has already gone wrong and this is the only
-            # account of it.
-            if ! git rev-parse --verify --quiet refs/remotes/origin/main-local >/dev/null; then
-              echo "main-local is not on the remote yet, so there is nothing to compare."
-            elif git merge-base --is-ancestor origin/main origin/main-local; then
-              echo "main-local is up to date with main."
-            else
-              behind="$(git rev-list --count origin/main-local..origin/main)"
-              echo "> **main-local is ${behind} commit(s) behind main.**"
-              echo "> Merge when you are ready to reconcile any overlap:"
-              echo '> ```sh'
-              echo '> git switch main-local && git fetch origin'
-              echo '> git merge origin/main'
-              echo '> ```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"

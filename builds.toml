@@ -1,0 +1,45 @@
+# What this fork builds and releases. Each [build.<name>] table is one series
+# of releases. Pushing a change to this file builds every table that changed,
+# and publishes it: editing it is how a release is cut.
+#
+#   tag         The release's tag. A fixed prefix, then any of:
+#                 {upstream}  the version in the base's Cargo.toml
+#                 {version}   this table's `version`
+#                 {date}      the build date as yymmdd, UTC
+#               A tag that already exists is an error, except that a {date}
+#               tag gets a .2, .3 and so on for a second build the same day.
+#   base        What the build starts from.
+#   stack       Merged onto the base in order. Empty means the base as it is.
+#   on          "change" (default) builds only when this table changes.
+#               "nightly" also builds every night that its inputs moved.
+#   version     Filled into {version}. Bumping it cuts the next release.
+#   prerelease  Marks the release as a prerelease. Defaults to true for
+#               nightly builds and false otherwise.
+#   publish     false makes the build test and compile but never release.
+#   keep        For nightly builds, how many releases to keep.
+#
+# A ref in base or stack is one of:
+#   upstream:main        a branch of zellij-org/zellij
+#   upstream:pull/5652   an upstream pull request, as its author last pushed it
+#   feat/x               a branch of this fork (or origin:feat/x)
+#
+# Each prefix (the part before the first {) names one series, and release notes
+# cover what changed since the previous release with the same prefix. Do not
+# let one build's prefix start with another's.
+
+# Upstream's main as it is, since upstream publishes no nightly builds.
+[build.nightly]
+tag = "nightly-v{upstream}-{date}"
+base = "upstream:main"
+stack = []
+on = "nightly"
+keep = 7
+
+# This fork's own release. Everything the fork carried has been merged
+# upstream, so the stack is empty for now; add a branch or an upstream pull
+# request to it, and bump version, to release a build with them.
+[build.fork]
+tag = "fork-v{version}"
+version = "0.46.3"
+base = "upstream:main"
+stack = []

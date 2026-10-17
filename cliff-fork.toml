@@ -75,6 +75,8 @@ commit_parsers = [
   # Merge commits describe branch plumbing rather than a change to the program.
   # The commits they bring in are listed on their own.
   { message = "^Merge ", skip = true },
+  # The merges builds.py makes when it assembles a stack.
+  { message = "^Stack ", skip = true },
   { message = "^feat", group = "<!-- 00 -->Features" },
   { message = "^fix", group = "<!-- 01 -->Bug Fixes" },
   { message = "^refactor", group = "<!-- 02 -->Refactor" },
