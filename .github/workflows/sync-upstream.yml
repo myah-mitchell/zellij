@@ -43,7 +43,7 @@ jobs:
     # a secret becomes visible to one. It has to be on the job rather than on
     # the step, because a step's own env is not in place yet when its `if` runs.
     env:
-      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_CLIENT_ID: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
     steps:
       # GITHUB_TOKEN is not allowed to push a commit that adds or changes
       # anything under .github/workflows/, and `permissions:` has no key that
@@ -51,7 +51,7 @@ jobs:
       # those syncs fail on the built-in token alone.
       #
       # A GitHub App installed on this fork with Contents: write and
-      # Workflows: write can push them. Set AUTOMATION_APP_ID and AUTOMATION_APP_PRIVATE_KEY
+      # Workflows: write can push them. Set AUTOMATION_APP_CLIENT_ID and AUTOMATION_APP_PRIVATE_KEY
       # as secrets to use one. The token this mints lasts an hour and is revoked
       # when the job ends.
       #
@@ -60,11 +60,10 @@ jobs:
       # day upstream leaves its workflow files alone.
       - name: Mint an app token
         id: app-token
-        if: env.AUTOMATION_APP_ID != ''
+        if: env.AUTOMATION_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          # The secret holds the app ID, which GitHub accepts here as well.
-          client-id: ${{ secrets.AUTOMATION_APP_ID }}
+          client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Checkout repository
@@ -101,7 +100,7 @@ jobs:
           fi
 
           if ! git push origin "${after}:refs/heads/main"; then
-            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which the built-in token may not push. Install an app on this fork with Contents: write and Workflows: write and set AUTOMATION_APP_ID and AUTOMATION_APP_PRIVATE_KEY, or fast-forward main by hand this once."
+            echo "::error::Pushing main failed. If the message above refuses the push for want of the workflow scope, upstream has changed a file under .github/workflows/, which the built-in token may not push. Install an app on this fork with Contents: write and Workflows: write and set AUTOMATION_APP_CLIENT_ID and AUTOMATION_APP_PRIVATE_KEY, or fast-forward main by hand this once."
             exit 1
           fi
           echo "::notice::main ${before:0:7} -> ${after:0:7}"

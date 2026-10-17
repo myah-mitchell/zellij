@@ -150,8 +150,9 @@ does not.
 The built-in workflow token may not push commits that change anything under
 `.github/workflows/`, and upstream edits its workflows every few weeks. So both
 workflows push with a token minted from a GitHub App installed on this fork,
-with **Contents: write** and **Workflows: write**. Its ID and private key are
-the repository secrets `AUTOMATION_APP_ID` and `AUTOMATION_APP_PRIVATE_KEY`.
+with **Contents: write** and **Workflows: write**. Its client ID (from the
+app's settings page, not the numeric app ID) and private key are the
+repository secrets `AUTOMATION_APP_CLIENT_ID` and `AUTOMATION_APP_PRIVATE_KEY`.
 The token lasts an hour and is revoked when the job ends.
 
 A push made with an app token starts workflows, so each sync that moves `main`

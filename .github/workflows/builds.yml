@@ -101,8 +101,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          # The secret holds the app ID, which GitHub accepts here as well.
-          client-id: ${{ secrets.AUTOMATION_APP_ID }}
+          client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
       # Full history of every branch, so the upstream fetch below only brings
@@ -396,8 +395,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          # The secret holds the app ID, which GitHub accepts here as well.
-          client-id: ${{ secrets.AUTOMATION_APP_ID }}
+          client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
       # The tooling, for cliff-fork.toml, and the build itself with its full
