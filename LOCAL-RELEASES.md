@@ -86,8 +86,8 @@ fail on these.
 Give the workflow the app by setting two repository secrets under Settings,
 Secrets and variables, Actions:
 
-- `SYNC_APP_ID`, the app's ID
-- `SYNC_APP_PRIVATE_KEY`, the app's private key
+- `AUTOMATION_APP_ID`, the app's ID
+- `AUTOMATION_APP_PRIVATE_KEY`, the app's private key
 
 With them unset the workflow falls back to the built-in token.
 
