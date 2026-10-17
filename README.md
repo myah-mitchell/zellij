@@ -113,7 +113,7 @@ already in the base. Drop it from the stack when convenient.
 | Archive | For |
 |---|---|
 | `zellij-x86_64-unknown-linux-musl.tar.gz` | Any Linux. Static, so it cannot open `zellij window`. |
-| `zellij-x86_64-unknown-linux-gnu.tar.gz` | Linux with a recent glibc. Use this one for `zellij window`, including under WSLg. |
+| `zellij-x86_64-unknown-linux-gnu.tar.gz` | Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13). Use this one for `zellij window`, including under WSLg. |
 | `zellij-x86_64-pc-windows-msvc.zip` | Windows. `zellij.exe`, and `zellij-window.exe` when the build has it. |
 
 A build makes all three unless its `targets` in `builds.toml` names fewer;

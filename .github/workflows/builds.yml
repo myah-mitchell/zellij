@@ -55,7 +55,7 @@ jobs:
 
   plan:
     name: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -86,7 +86,7 @@ jobs:
     # A failed sync leaves main behind, but builds take their base straight
     # from upstream, so they go ahead regardless.
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.names != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -101,7 +101,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          # The secret holds the app ID, which GitHub accepts here as well.
+          client-id: ${{ secrets.AUTOMATION_APP_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
       # Full history of every branch, so the upstream fetch below only brings
@@ -227,10 +228,26 @@ jobs:
         with:
           ref: ${{ matrix.build.sha }}
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # Fetched directly, since arduino/setup-protoc still targets Node 20.
+      # 23.4 is the version that action installed, and what upstream builds
+      # with, so the generated code matches theirs.
+      - name: Install protoc
+        shell: bash
+        env:
+          VERSION: "23.4"
+        run: |
+          set -euo pipefail
+          case "${RUNNER_OS}" in
+            Linux)   asset=linux-x86_64 sum=0502f286ac9ed860b629a7965a14527b1f2dd131e4283fa23c2d7f184672aa9a ;;
+            Windows) asset=win64        sum=a309c39442fb75f0db343cb22c111a00f91cdf0767f332e170644b9378e2bcc6 ;;
+          esac
+          cd "${RUNNER_TEMP}"
+          curl -sSfL --retry 3 -o protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${VERSION}/protoc-${VERSION}-${asset}.zip"
+          echo "${sum}  protoc.zip" | sha256sum -c -
+          # Git Bash on Windows has no unzip; 7-Zip is on the runner image.
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then 7z x -y -oprotoc protoc.zip > /dev/null; else unzip -q -o protoc.zip -d protoc; fi
+          echo "${RUNNER_TEMP}/protoc/bin" >> "$GITHUB_PATH"
 
       # musl-gcc, for the dependencies that compile C.
       - name: Install musl-tools
@@ -238,9 +255,21 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends musl-tools
 
       # A dependency assembles part of itself with NASM when built for MSVC.
+      # Fetched directly, since ilammy/setup-nasm still targets Node 20, from
+      # the mirror that action used first. 2.16.01 is the version it installed.
       - name: Install NASM
         if: matrix.target.name == 'windows'
-        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        shell: bash
+        env:
+          VERSION: "2.16.01"
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}"
+          curl -sSfL --retry 3 -o nasm.zip \
+            "https://github.com/ilammy/setup-nasm/raw/mirror/releasebuilds/${VERSION}/win64/nasm-${VERSION}-win64.zip"
+          echo "029eed31faf0d2c5f95783294432cbea6c15bf633430f254bb3c1f195c67ca3a  nasm.zip" | sha256sum -c -
+          7z x -y nasm.zip > /dev/null
+          echo "${RUNNER_TEMP}/nasm-${VERSION}" >> "$GITHUB_PATH"
 
       # rust-toolchain.toml in the build pins the channel and targets.
       #
@@ -334,7 +363,7 @@ jobs:
     name: publish ${{ matrix.build.name }}
     needs: [assemble, build]
     if: ${{ !cancelled() && needs.assemble.outputs.publish != '' && needs.assemble.outputs.publish != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -367,7 +396,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          # The secret holds the app ID, which GitHub accepts here as well.
+          client-id: ${{ secrets.AUTOMATION_APP_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
       # The tooling, for cliff-fork.toml, and the build itself with its full
