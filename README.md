@@ -68,7 +68,8 @@ it gets `.2`, `.3` and so on for a second build the same day.
 Actions, Builds, Run workflow. Name the builds (or leave `all`) and leave
 "Publish releases" off. The run assembles, tests and compiles, pushes the
 result to `build/<name>`, and keeps the archives on the run's page for a few
-days. Nothing is tagged.
+days. Nothing is tagged, so a table builds even when its version is already
+released, which lets you try a stack change before bumping it.
 
 To assemble one on your own machine, from a checkout of this branch:
 

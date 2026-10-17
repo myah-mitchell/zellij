@@ -68,6 +68,10 @@ class Fail(Exception):
 class AlreadyReleased(Exception):
     """The build's tag exists and cannot be renumbered."""
 
+    def __init__(self, tag: str, message: str):
+        super().__init__(message)
+        self.tag = tag
+
 
 def git(*args: str, cwd: Path | str | None = None, check: bool = True) -> str:
     result = subprocess.run(
@@ -278,8 +282,14 @@ def cmd_assemble(args: argparse.Namespace) -> None:
         tag = choose_tag(build, upstream, args, repo)
         skip = ""
     except AlreadyReleased as e:
-        tag, skip = "", str(e)
-        print(f"{args.name}: {skip}", file=sys.stderr)
+        if args.trial:
+            # Nothing will be published, so the tag only labels the trial.
+            tag, skip = e.tag, ""
+            print(f"{args.name}: {tag} exists, but this is a trial, so it builds anyway",
+                  file=sys.stderr)
+        else:
+            tag, skip = "", str(e)
+            print(f"{args.name}: {skip}", file=sys.stderr)
 
     result = {
         "name": args.name,
@@ -354,6 +364,7 @@ def choose_tag(build: dict, upstream: str, args: argparse.Namespace, repo: Path)
     # reaches here for a release that already went out. Reported, and the build
     # is left out of the run.
     raise AlreadyReleased(
+        tag,
         f"{tag} is already released. Bump `version` for this build in builds.toml "
         f"to cut a new one."
     )
@@ -420,6 +431,8 @@ def main() -> None:
     p.add_argument("--worktree", help="where to assemble; a new temporary directory by default")
     p.add_argument("--rerere", default=str(DEFAULT_RERERE), help="recorded resolutions to replay")
     p.add_argument("--date", help="yymmdd to use for {date}; today, UTC, by default")
+    p.add_argument("--trial", action="store_true",
+                   help="nothing will be published: build even if the tag already exists")
     p.set_defaults(func=cmd_assemble)
 
     p = sub.add_parser("record", help="save the conflict resolutions in a worktree")

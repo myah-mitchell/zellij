@@ -135,7 +135,11 @@ jobs:
           for name in $(jq -r '.[]' <<<"${NAMES}"); do
             echo "::group::${name}"
             out="${RUNNER_TEMP}/builds/${name}.json"
-            if ! python3 -I tooling/builds.py assemble "${name}" --repo . \
+            # A run that publishes nothing is a trial, and builds a table
+            # even when its tag is already released.
+            trial=()
+            [[ "${PUBLISH}" == "true" ]] || trial=(--trial)
+            if ! python3 -I tooling/builds.py assemble "${name}" --repo . "${trial[@]}" \
                 --worktree "${RUNNER_TEMP}/wt-${name}" > "${out}"; then
               echo "::endgroup::"
               echo "::error::${name} could not be assembled; see the log above."
