@@ -60,8 +60,10 @@ work arrives in `main` and `main-local`, and `main-window` can be retired.
 
 ## Syncing from upstream
 
-`.github/workflows/sync-upstream.yml` runs daily at 06:00 UTC, and on demand
-from the Actions tab. It fast-forwards `main` to `upstream/main` and does
+`.github/workflows/sync-upstream.yml` runs weekly, Mondays at 06:00 UTC. It
+also runs on demand from the Actions tab, and from any workflow that calls it
+as its first job so that a build starts from upstream's latest rather than from
+a main up to a week old. It fast-forwards `main` to `upstream/main` and does
 nothing else. It never forces, so it fails rather than rewriting anything.
 A failed run means one of two things, and the run's summary and error say which:
 
