@@ -16,6 +16,9 @@
 #   prerelease  Marks the release as a prerelease. Defaults to true for
 #               nightly builds and false otherwise.
 #   publish     false makes the build test and compile but never release.
+#   targets     What to compile for, from linux-musl, linux-gnu and windows.
+#               Defaults to all three. linux-musl runs on any Linux but cannot
+#               open `zellij window`; linux-gnu can.
 #   keep        For nightly builds, how many releases to keep.
 #
 # A ref in base or stack is one of:
@@ -34,6 +37,7 @@ base = "upstream:main"
 stack = []
 on = "nightly"
 keep = 7
+targets = ["linux-musl"]
 
 # This fork's own release. Everything the fork carried has been merged
 # upstream, so the stack is empty for now; add a branch or an upstream pull

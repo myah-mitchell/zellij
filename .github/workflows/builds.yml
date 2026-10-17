@@ -91,6 +91,7 @@ jobs:
       contents: read
     outputs:
       builds: ${{ steps.assemble.outputs.builds }}
+      jobs: ${{ steps.assemble.outputs.jobs }}
       publish: ${{ steps.assemble.outputs.publish }}
     steps:
       # The built-in token may not push commits that touch .github/workflows/,
@@ -174,8 +175,14 @@ jobs:
           else
             publish='[]'
           fi
-          echo "builds=${builds}" >> "$GITHUB_OUTPUT"
-          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          # One entry per build and target, since each build picks its own
+          # targets and a matrix of builds x targets cannot leave some out.
+          jobs="$(jq -c '[.[] | del(.targets) as $b | .targets[] | {build: $b, target: .}]' <<<"${builds}")"
+          {
+            echo "builds=${builds}"
+            echo "jobs=${jobs}"
+            echo "publish=${publish}"
+          } >> "$GITHUB_OUTPUT"
 
           if (( ${#failed[@]} )); then
             echo "::error::Not assembled: ${failed[*]}. The other builds carry on."
@@ -190,36 +197,26 @@ jobs:
   #
   # Tests are what upstream's rust.yml runs: everything on Linux, and on
   # Windows the library tests of the three crates upstream keeps passing there.
-  # The glibc build shares the musl build's Linux tests rather than repeating
-  # them, and publish requires both.
+  # A build with both Linux targets runs the Linux tests once, on the first,
+  # and publish requires both.
+  #
+  # The targets themselves are defined in tooling/builds.py (TARGETS), and
+  # each build lists the ones it wants in builds.toml:
+  #   linux-musl  fully static, so it runs on any Linux, but cannot load the
+  #               shared libraries `zellij window` needs to open a window
+  #   linux-gnu   linked against glibc, so the window can load the system's
+  #               Wayland or X11 libraries (WSLg under WSL2)
+  #   windows     MSVC, with the C runtime linked in
   build:
     name: ${{ matrix.build.name }} (${{ matrix.target.name }})
     needs: assemble
-    if: ${{ !cancelled() && needs.assemble.outputs.builds != '' && needs.assemble.outputs.builds != '[]' }}
+    if: ${{ !cancelled() && needs.assemble.outputs.jobs != '' && needs.assemble.outputs.jobs != '[]' }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        build: ${{ fromJSON(needs.assemble.outputs.builds) }}
-        target:
-          # Fully static, so it runs on any Linux. It cannot load shared
-          # libraries, so `zellij window` cannot open a window from it.
-          - name: linux-musl
-            os: ubuntu-latest
-            triple: x86_64-unknown-linux-musl
-            bin: target/x86_64-unknown-linux-musl/release
-          # Linked dynamically against glibc, so the window can load the
-          # system's Wayland or X11 libraries (WSLg under WSL2). Needs
-          # ubuntu-latest's glibc or newer.
-          - name: linux-gnu
-            os: ubuntu-latest
-            triple: x86_64-unknown-linux-gnu
-            bin: target/release
-          - name: windows
-            os: windows-latest
-            triple: x86_64-pc-windows-msvc
-            bin: target/release
+        include: ${{ fromJSON(needs.assemble.outputs.jobs) }}
     runs-on: ${{ matrix.target.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -249,11 +246,11 @@ jobs:
           rustflags: ""
 
       - name: Test
-        if: matrix.target.name == 'linux-musl'
+        if: matrix.target.test == 'linux'
         run: cargo xtask test
 
       - name: Test
-        if: matrix.target.name == 'windows'
+        if: matrix.target.test == 'windows'
         run: |
           cargo test --no-default-features -p zellij-utils --lib
           cargo test --no-default-features -p zellij-server --lib
@@ -336,15 +333,17 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Never publish a release with a platform missing.
+      # Never publish a release with one of its targets missing.
       - name: Check every target built
         working-directory: dist
+        env:
+          BUILD: ${{ toJSON(matrix.build) }}
         run: |
           set -euo pipefail
           missing=0
-          for f in zellij-x86_64-unknown-linux-musl.tar.gz zellij-x86_64-unknown-linux-gnu.tar.gz \
-                   zellij-x86_64-pc-windows-msvc.zip; do
-            [[ -f "${f}" ]] || { echo "::error::${f} is missing: its tests or build failed."; missing=1; }
+          for triple in $(jq -r '.targets[].triple' <<<"${BUILD}"); do
+            compgen -G "zellij-${triple}.*" > /dev/null \
+              || { echo "::error::zellij-${triple} is missing: its tests or build failed."; missing=1; }
           done
           exit "${missing}"
 
@@ -418,9 +417,13 @@ jobs:
             jq -r '.stack[] | "| Stacked | `\(.ref)` at `\(.sha[:9])`\(if .merged then "" else " (already in the base)" end) |"' <<<"${BUILD}"
             echo "| Commit | \`$(jq -r '.sha[:9]' <<<"${BUILD}")\` on \`build/$(jq -r .name <<<"${BUILD}")\` |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
-            echo "| Targets | \`x86_64-unknown-linux-musl\`, \`x86_64-unknown-linux-gnu\`, \`x86_64-pc-windows-msvc\` |"
+            echo "| Targets | $(jq -r '[.targets[] | "`\(.triple)`"] | join(", ")' <<<"${BUILD}") |"
             echo
-            echo "Use the \`linux-gnu\` build for \`zellij window\`. The \`musl\` build is static and cannot open a window."
+            if jq -e '[.targets[].name] | index("linux-gnu") and index("linux-musl")' <<<"${BUILD}" > /dev/null; then
+              echo "Use the \`linux-gnu\` build for \`zellij window\`. The \`musl\` build is static and cannot open a window."
+            elif jq -e '[.targets[].name] | index("linux-musl")' <<<"${BUILD}" > /dev/null; then
+              echo "The Linux build is static (\`musl\`), so \`zellij window\` cannot open a window from it."
+            fi
             echo
             cat CHANGES.md
             echo

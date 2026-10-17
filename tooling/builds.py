@@ -36,6 +36,30 @@ TRIGGERS = ("change", "nightly")
 PLACEHOLDERS = {"upstream", "version", "date"}
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
+# What builds.yml can compile, in the order it lists them. `bin` is where the
+# binary lands, and `test` is the suite the job runs before building: Linux
+# runs everything once, on whichever Linux target the build has first.
+TARGETS = {
+    "linux-musl": {
+        "os": "ubuntu-latest",
+        "triple": "x86_64-unknown-linux-musl",
+        "bin": "target/x86_64-unknown-linux-musl/release",
+        "test": "linux",
+    },
+    "linux-gnu": {
+        "os": "ubuntu-latest",
+        "triple": "x86_64-unknown-linux-gnu",
+        "bin": "target/release",
+        "test": "linux",
+    },
+    "windows": {
+        "os": "windows-latest",
+        "triple": "x86_64-pc-windows-msvc",
+        "bin": "target/release",
+        "test": "windows",
+    },
+}
+
 
 class Fail(Exception):
     """An error meant for the reader, printed without a traceback."""
@@ -81,7 +105,7 @@ def validate(name: str, build: dict, source: str) -> None:
     where = f"{source}: [build.{name}]"
     if not NAME_RE.match(name):
         raise Fail(f"{where}: names are lowercase letters, digits and hyphens")
-    known = {"tag", "base", "stack", "on", "version", "prerelease", "publish", "keep"}
+    known = {"tag", "base", "stack", "on", "version", "prerelease", "publish", "keep", "targets"}
     unknown = set(build) - known
     if unknown:
         raise Fail(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
@@ -92,6 +116,14 @@ def validate(name: str, build: dict, source: str) -> None:
         isinstance(s, str) for s in build.get("stack", [])
     ):
         raise Fail(f"{where}: `stack` is a list of refs")
+    targets = build.get("targets", list(TARGETS))
+    if (
+        not isinstance(targets, list)
+        or not targets
+        or not all(t in TARGETS for t in targets)
+        or len(set(targets)) != len(targets)
+    ):
+        raise Fail(f"{where}: `targets` is a non-empty list drawn from {', '.join(TARGETS)}")
     if build.get("on", "change") not in TRIGGERS:
         raise Fail(f"{where}: `on` is one of {', '.join(TRIGGERS)}")
     used = set(re.findall(r"\{([^}]*)\}", build["tag"]))
@@ -107,6 +139,19 @@ def validate(name: str, build: dict, source: str) -> None:
         raise Fail(f"{where}: the tag must start with a fixed prefix, like `fork-v`")
     for ref in [build["base"], *build.get("stack", [])]:
         parse_ref(ref, where)
+
+
+def build_targets(build: dict) -> list[dict]:
+    """The build's targets as builds.yml's matrix wants them, in TARGETS order."""
+    chosen = build.get("targets", list(TARGETS))
+    out, tested = [], set()
+    for name, target in TARGETS.items():
+        if name not in chosen:
+            continue
+        test = target["test"] if target["test"] not in tested else ""
+        tested.add(target["test"])
+        out.append({"name": name, **target, "test": test})
+    return out
 
 
 def parse_ref(ref: str, where: str = "") -> tuple[str, str]:
@@ -244,6 +289,7 @@ def cmd_assemble(args: argparse.Namespace) -> None:
         "prerelease": bool(build.get("prerelease", build.get("on") == "nightly")),
         "publish": bool(build.get("publish", True)),
         "upstream_version": upstream,
+        "targets": build_targets(build),
         "base": base,
         "stack": stack,
         "worktree": str(worktree),

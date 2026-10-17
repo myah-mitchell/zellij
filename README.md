@@ -108,12 +108,13 @@ already in the base. Drop it from the stack when convenient.
 | `zellij-x86_64-unknown-linux-gnu.tar.gz` | Linux with a recent glibc. Use this one for `zellij window`, including under WSLg. |
 | `zellij-x86_64-pc-windows-msvc.zip` | Windows. `zellij.exe`, and `zellij-window.exe` when the build has it. |
 
-Each comes with a `.sha256sum`. The release notes list the base and every
+A build makes all three unless its `targets` in `builds.toml` names fewer;
+`nightly` makes only the musl one. Each comes with a `.sha256sum`. The release notes list the base and every
 stacked ref with the commit each was at, then the conventional commits since
 the previous release with the same tag prefix. A series' first release covers
 everything since the upstream release its base descends from.
 
-A build is only published when all three archives exist, and each archive only
+A build is only published when all of its archives exist, and each archive only
 exists if its platform's tests passed. Linux runs the whole `cargo xtask test`;
 Windows runs the library tests of `zellij-utils`, `zellij-server` and
 `zellij-client`, which is what upstream keeps passing there. Upstream's own
