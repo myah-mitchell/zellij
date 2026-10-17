@@ -44,6 +44,6 @@ targets = ["linux-musl"]
 # request to it, and bump version, to release a build with them.
 [build.fork]
 tag = "fork-v{version}"
-version = "0.46.3"
+version = "0.46.4"
 base = "upstream:main"
 stack = ["feat/config-alias-per-key-edit"]
