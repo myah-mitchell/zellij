@@ -10,7 +10,7 @@ pub struct EventNameList {
 pub struct Event {
     #[prost(enumeration="EventType", tag="1")]
     pub name: i32,
-    #[prost(oneof="event::Payload", tags="2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54")]
+    #[prost(oneof="event::Payload", tags="2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55")]
     pub payload: ::core::option::Option<event::Payload>,
 }
 /// Nested message and enum types in `Event`.
@@ -122,7 +122,25 @@ pub mod event {
         SessionPreviewPayload(super::SessionPreviewPayload),
         #[prost(message, tag="54")]
         SavedSessionPreviewPayload(super::SavedSessionPreviewPayload),
+        #[prost(message, tag="55")]
+        PluginSettingsEntriesPayload(super::PluginSettingsEntriesPayload),
     }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PluginSettingsEntry {
+    #[prost(string, tag="1")]
+    pub label: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub plugin_url: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="3")]
+    pub configuration: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PluginSettingsEntriesPayload {
+    #[prost(message, repeated, tag="1")]
+    pub entries: ::prost::alloc::vec::Vec<PluginSettingsEntry>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1253,6 +1271,7 @@ pub enum EventType {
     TerminalCommandSubmitted = 60,
     SessionPreview = 61,
     SavedSessionPreview = 62,
+    PluginSettingsEntries = 63,
 }
 impl EventType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1322,6 +1341,7 @@ impl EventType {
             EventType::TerminalCommandSubmitted => "TerminalCommandSubmitted",
             EventType::SessionPreview => "SessionPreview",
             EventType::SavedSessionPreview => "SavedSessionPreview",
+            EventType::PluginSettingsEntries => "PluginSettingsEntries",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1388,6 +1408,7 @@ impl EventType {
             "TerminalCommandSubmitted" => Some(Self::TerminalCommandSubmitted),
             "SessionPreview" => Some(Self::SessionPreview),
             "SavedSessionPreview" => Some(Self::SavedSessionPreview),
+            "PluginSettingsEntries" => Some(Self::PluginSettingsEntries),
             _ => None,
         }
     }

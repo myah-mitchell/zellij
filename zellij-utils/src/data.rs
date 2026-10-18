@@ -1281,6 +1281,17 @@ pub enum Event {
     TerminalCommandSubmitted,
     SessionPreview(SessionPreview),
     SavedSessionPreview(SavedSessionPreview),
+    /// Sent when the list changes and once to a plugin when it loads.
+    PluginSettingsEntries(Vec<PluginSettingsEntry>),
+}
+
+/// An entry a plugin registered for the settings screen with `register_settings_entry`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginSettingsEntry {
+    pub label: String,
+    /// A plugin URL or alias.
+    pub plugin_url: String,
+    pub configuration: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -4924,6 +4935,11 @@ pub enum PluginCommand {
         pane_id: Option<(u32, bool)>,
     },
     GetSavedSessionPreview(String),
+    RegisterSettingsEntry {
+        label: String,
+        plugin_url: Option<String>,
+        configuration: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

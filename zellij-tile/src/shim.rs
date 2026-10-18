@@ -1023,6 +1023,40 @@ pub fn get_saved_session_preview(name: &str) {
     run_plugin_command(PluginCommand::GetSavedSessionPreview(name.to_owned()));
 }
 
+/// Add an entry for this plugin to Zellij's settings screen.
+///
+/// Activating the entry launches `plugin_url` (a plugin URL or alias, or the calling plugin if
+/// `None`) in a floating pane with `configuration`. Registering the same `label` again replaces
+/// the entry. Entries stay listed after the plugin that registered them is closed.
+///
+/// Call this once the permission is granted (on `Event::PermissionRequestResult`), since a call
+/// made before then is dropped. An entry's `configuration` is visible to every plugin with
+/// `ReadApplicationState` through `Event::PluginSettingsEntries`.
+///
+/// # Permissions Required
+/// * `ChangeApplicationState`
+///
+/// # Example
+/// ```no_run
+/// use std::collections::BTreeMap;
+/// use zellij_tile::prelude::*;
+///
+/// let mut configuration = BTreeMap::new();
+/// configuration.insert("page".to_owned(), "settings".to_owned());
+/// register_settings_entry("My plugin", None, configuration);
+/// ```
+pub fn register_settings_entry(
+    label: &str,
+    plugin_url: Option<String>,
+    configuration: BTreeMap<String, String>,
+) {
+    run_plugin_command(PluginCommand::RegisterSettingsEntry {
+        label: label.to_owned(),
+        plugin_url,
+        configuration,
+    });
+}
+
 pub fn hide_self() {
     let plugin_command = PluginCommand::HideSelf;
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();

@@ -256,6 +256,7 @@ enum CommandName {
   SwitchSessionAndCloseCurrent = 262;
   GetSessionPreview = 263;
   GetSavedSessionPreview = 264;
+  RegisterSettingsEntry = 265;
 }
 
 message PluginCommand {
@@ -452,7 +453,14 @@ message PluginCommand {
     SwitchSessionPayload switch_session_and_close_current_payload = 205;
     GetSessionPreviewPayload get_session_preview_payload = 206;
     string get_saved_session_preview_payload = 207;
+    RegisterSettingsEntryPayload register_settings_entry_payload = 208;
   }
+}
+
+message RegisterSettingsEntryPayload {
+  string label = 1;
+  optional string plugin_url = 2;
+  map<string, string> configuration = 3;
 }
 
 message GetSessionSuggestionsPayload {

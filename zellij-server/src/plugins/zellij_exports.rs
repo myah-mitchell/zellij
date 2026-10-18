@@ -520,6 +520,28 @@ fn get_saved_session_preview(env: &PluginEnv, name: String) {
         });
 }
 
+fn register_settings_entry(
+    env: &PluginEnv,
+    label: String,
+    plugin_url: Option<String>,
+    configuration: BTreeMap<String, String>,
+) {
+    env.senders
+        .send_to_plugin(PluginInstruction::RegisterSettingsEntry {
+            registered_by: env.plugin.location.display(),
+            label,
+            plugin_url,
+            configuration,
+        })
+        .with_context(|| {
+            format!(
+                "failed to register a settings entry from plugin {}",
+                env.name()
+            )
+        })
+        .non_fatal();
+}
+
 fn set_popup_size(env: &mut PluginEnv, width: usize, height: usize) {
     env.pending_popup_size = Some((width, height));
     env.senders
@@ -616,6 +638,11 @@ fn host_run_plugin_command(mut caller: Caller<'_, PluginEnv>) {
                     PluginCommand::GetSavedSessionPreview(name) => {
                         get_saved_session_preview(env, name)
                     },
+                    PluginCommand::RegisterSettingsEntry {
+                        label,
+                        plugin_url,
+                        configuration,
+                    } => register_settings_entry(env, label, plugin_url, configuration),
                     PluginCommand::RunContextMenuItem(index) => {
                         run_context_menu_item(env, index)
                     },
@@ -6612,7 +6639,8 @@ fn required_permission(command: &PluginCommand) -> Option<PermissionType> {
         | PluginCommand::SetPopupSize { .. }
         | PluginCommand::SetPopupFocused(..)
         | PluginCommand::PopupToFloatingPane(..)
-        | PluginCommand::SwitchSessionAndCloseCurrent(..) => PermissionType::ChangeApplicationState,
+        | PluginCommand::SwitchSessionAndCloseCurrent(..)
+        | PluginCommand::RegisterSettingsEntry { .. } => PermissionType::ChangeApplicationState,
         PluginCommand::Prompt { .. } | PluginCommand::ReplyToPrompt { .. } => {
             PermissionType::OpenTerminalsOrPlugins
         },
