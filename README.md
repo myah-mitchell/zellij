@@ -31,9 +31,8 @@ every branch that gets built.
 - **`archive/*`** branches are finished work kept for reference. A ruleset
   stops them being changed or deleted. `archive/fork-tooling` holds this
   branch's history from before it was split off from zellij's.
-- **`main-local`** is `main` plus the fork's work, merged by hand, from before
-  `builds.toml` existed. It is frozen, and will be archived once the new system
-  has published a release.
+  `archive/main-local` is `main` plus the fork's work, merged by hand, from
+  before `builds.toml` existed.
 
 ## Builds
 
@@ -126,7 +125,9 @@ A build is only published when all of its archives exist, and each archive only
 exists if its platform's tests passed. Linux runs the whole `cargo xtask test`;
 Windows runs the library tests of `zellij-utils`, `zellij-server` and
 `zellij-client`, which is what upstream keeps passing there. Upstream's own
-`rust.yml` and `e2e.yml` run on `main` only, so they never see a build.
+`rust.yml` and `e2e.yml` are disabled here (see
+[Syncing from upstream](#syncing-from-upstream)), and would only run on `main`
+anyway, so they never see a build.
 
 ## Tag prefixes
 
@@ -156,8 +157,11 @@ repository secrets `AUTOMATION_APP_CLIENT_ID` and `AUTOMATION_APP_PRIVATE_KEY`.
 The token lasts an hour and is revoked when the job ends.
 
 A push made with an app token starts workflows, so each sync that moves `main`
-also runs upstream's `rust.yml` on it. That duplicates upstream's own run and
-can be turned off by disabling those workflows here.
+would also run upstream's `rust.yml` and `e2e.yml` on it, duplicating
+upstream's own runs. Both are disabled in this fork's Actions settings, which
+GitHub keeps per workflow rather than in the file, so a sync that rewrites them
+leaves them disabled. Re-enable one with `gh workflow enable "Rust"` or
+`gh workflow enable "End to End tests"`.
 
 To sync by hand:
 

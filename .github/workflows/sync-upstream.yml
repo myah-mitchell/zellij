@@ -16,7 +16,10 @@
 # upstream has had workflow files since v0.5.1.
 #
 # An app token, unlike the built-in one, does start workflow runs, so a sync
-# that moves main also starts the inherited rust.yml against upstream's commits.
+# that moves main would also start the inherited rust.yml and e2e.yml against
+# upstream's commits. Both are disabled in this fork's Actions settings, which
+# is kept per workflow rather than in the file, so a sync that rewrites them
+# leaves them disabled. Upstream runs the same CI on pull requests sent to it.
 #
 # Weekly rather than daily, because main only has to be current when something
 # is cut from it. builds.yml calls this workflow as its first job, so every
