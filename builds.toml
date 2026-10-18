@@ -36,6 +36,7 @@ tag = "nightly-v{upstream}-{date}"
 base = "upstream:main"
 stack = []
 on = "nightly"
+targets = ["linux-musl"]
 keep = 7
 
 # This fork's own release. Everything the fork carried has been merged
@@ -52,5 +53,5 @@ stack = ["feat/config-alias-per-key-edit"]
 tag = "fork-ea-v{version}-{date}"
 version = "0.46.4"
 base = "upstream:main"
-targets = ["linux-musl"]
 stack = ["feat/config-alias-per-key-edit"]
+targets = ["linux-musl"]
