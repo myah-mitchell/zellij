@@ -55,3 +55,4 @@ version = "0.46.4"
 base = "upstream:main"
 stack = ["feat/config-alias-per-key-edit", "fix/plugin-menu-outside-click"]
 targets = ["linux-musl"]
+prerelease = true
