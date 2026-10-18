@@ -41,6 +41,7 @@ pub(crate) struct Popup {
     pub wanted_rows: usize,
     pub anchor_pane: Option<PaneId>,
     pub held_back: bool,
+    pub close_on_outside_click: bool,
 }
 
 impl Popup {
@@ -246,6 +247,7 @@ impl Tab {
             wanted_rows,
             anchor_pane: None,
             held_back: false,
+            close_on_outside_click: false,
         });
         self.reflow_popups_for_client(client_id, Some(plugin_id));
         self.set_force_render();
@@ -304,6 +306,11 @@ impl Tab {
             current_rows,
         ));
         true
+    }
+    pub fn set_popup_close_on_outside_click(&mut self, plugin_id: u32, close: bool) {
+        if let Some(popup) = self.popup_with_plugin_id_mut(plugin_id) {
+            popup.close_on_outside_click = close;
+        }
     }
     pub fn set_popup_anchor(&mut self, plugin_id: u32, anchor_pane: Option<PaneId>) {
         if let Some(popup) = self
@@ -788,6 +795,7 @@ impl Tab {
         if !inside && is_press {
             return match popup.kind {
                 PopupKind::Menu => Some(PopupMouseOutcome::CloseRequested),
+                _ if popup.close_on_outside_click => Some(PopupMouseOutcome::CloseRequested),
                 PopupKind::Prompt | PopupKind::Modal | PopupKind::Info => {
                     Some(PopupMouseOutcome::Consumed)
                 },
