@@ -37,7 +37,6 @@ base = "upstream:main"
 stack = []
 on = "nightly"
 keep = 7
-targets = ["linux-musl"]
 
 # This fork's own release. Everything the fork carried has been merged
 # upstream, so the stack is empty for now; add a branch or an upstream pull
@@ -46,4 +45,12 @@ targets = ["linux-musl"]
 tag = "fork-v{version}"
 version = "0.46.4"
 base = "upstream:main"
+stack = ["feat/config-alias-per-key-edit"]
+
+# EA's of this fork's own release.
+[build.fork-ea]
+tag = "fork-ea-v{version}-{date}"
+version = "0.46.4"
+base = "upstream:main"
+targets = ["linux-musl"]
 stack = ["feat/config-alias-per-key-edit"]
