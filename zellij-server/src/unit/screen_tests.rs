@@ -16381,6 +16381,7 @@ fn a_popup_whose_plugin_fails_is_closed_and_unloaded() {
             20,
             5,
             None,
+            false,
         )
         .unwrap();
     assert!(screen
@@ -16399,6 +16400,67 @@ fn a_popup_whose_plugin_fails_is_closed_and_unloaded() {
         .try_iter()
         .any(|(instruction, _)| matches!(instruction, PluginInstruction::Unload(42)));
     assert!(unloaded);
+}
+
+#[test]
+fn a_click_outside_a_prompt_menu_closes_and_unloads_it() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 1;
+    let mut screen = create_new_screen(size, true, true);
+    let (to_plugin, plugin_receiver): ChannelWithContext<PluginInstruction> = channels::unbounded();
+    screen
+        .bus
+        .senders
+        .replace_to_plugin(SenderWithContext::new(to_plugin));
+    new_tab(&mut screen, 1, 0);
+    let tab_id = screen.get_active_tab(client_id).unwrap().id;
+    let run_plugin_or_alias =
+        RunPluginOrAlias::from_url("zellij:prompt", &None, None, None).unwrap();
+    for (plugin_id, close_on_outside_click) in [(42, false), (43, true)] {
+        screen
+            .add_popup(
+                plugin_id,
+                client_id,
+                tab_id,
+                run_plugin_or_alias.clone(),
+                crate::tab::PopupPlacement::At(Position::new(3, 3)),
+                crate::tab::PopupKind::Prompt,
+                20,
+                5,
+                None,
+                close_on_outside_click,
+            )
+            .unwrap();
+        screen.reveal_popup(plugin_id).unwrap();
+    }
+    let outside = MouseEvent::new_left_press_event(Position::new(15, 80));
+    assert!(screen.handle_popup_mouse_event(&outside, client_id));
+    assert_eq!(
+        screen
+            .get_active_tab(client_id)
+            .unwrap()
+            .popup_plugin_id(client_id),
+        Some(42)
+    );
+    assert!(screen.handle_popup_mouse_event(&outside, client_id));
+    assert_eq!(
+        screen
+            .get_active_tab(client_id)
+            .unwrap()
+            .popup_plugin_id(client_id),
+        Some(42)
+    );
+    let unloaded: Vec<u32> = plugin_receiver
+        .try_iter()
+        .filter_map(|(instruction, _)| match instruction {
+            PluginInstruction::Unload(plugin_id) => Some(plugin_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(unloaded, vec![43]);
 }
 
 #[test]
@@ -16434,6 +16496,7 @@ fn closing_the_pane_a_popup_belongs_to_closes_the_popup() {
             20,
             5,
             Some(PaneId::Terminal(2)),
+            false,
         )
         .unwrap();
     screen
@@ -16447,6 +16510,7 @@ fn closing_the_pane_a_popup_belongs_to_closes_the_popup() {
             20,
             5,
             Some(PaneId::Terminal(1)),
+            false,
         )
         .unwrap();
     assert!(!screen.close_popups_with_missing_anchor());
@@ -16492,6 +16556,7 @@ fn closing_the_top_popup_from_a_key_leaves_information_popups_open() {
             20,
             3,
             None,
+            false,
         )
         .unwrap();
     screen
@@ -16505,6 +16570,7 @@ fn closing_the_top_popup_from_a_key_leaves_information_popups_open() {
             20,
             5,
             None,
+            false,
         )
         .unwrap();
     let key = zellij_utils::data::KeyWithModifier::new(zellij_utils::data::BareKey::Char('a'));
@@ -16572,6 +16638,7 @@ fn switching_tabs_moves_information_popups_along_and_closes_focused_ones() {
                 20,
                 3,
                 None,
+                false,
             )
             .unwrap();
     }
@@ -16632,6 +16699,7 @@ impl MockScreenWithPrompt {
             width: 20,
             height: 5,
             anchor_pane: None,
+            close_on_outside_click: false,
         });
         MockScreenWithPrompt {
             mock_screen,
@@ -16838,6 +16906,7 @@ fn a_plugin_prompt_without_a_visible_caller_pane_opens_over_the_focused_pane() {
         None,
         true,
         false,
+        false,
     );
     let (client_id, kind, anchor_pane, caller_args) = loaded_prompt_popup(&plugin_receiver);
     assert_eq!(client_id, 1);
@@ -16865,6 +16934,7 @@ fn a_plugin_prompt_honours_an_explicit_pane_and_a_notice_takes_no_anchor() {
         )),
         true,
         false,
+        false,
     );
     let (_, _, anchor_pane, caller_args) = loaded_prompt_popup(&plugin_receiver);
     assert_eq!(anchor_pane, Some(focused_pane));
@@ -16883,6 +16953,7 @@ fn a_plugin_prompt_honours_an_explicit_pane_and_a_notice_takes_no_anchor() {
         )),
         false,
         false,
+        false,
     );
     let (_, kind, anchor_pane, _) = loaded_prompt_popup(&plugin_receiver);
     assert_eq!(kind, crate::tab::PopupKind::Info);
@@ -16899,6 +16970,7 @@ fn a_plugin_prompt_for_a_user_who_is_not_attached_fails() {
         RunPluginOrAlias::from_url("zellij:prompt", &None, None, None).unwrap(),
         None,
         true,
+        false,
         false,
     );
     let failed = plugin_receiver.try_iter().any(|(instruction, _)| {
@@ -18787,6 +18859,7 @@ fn screen_with_session_card(
             40,
             6,
             None,
+            false,
         )
         .unwrap();
     (screen, plugin_receiver)

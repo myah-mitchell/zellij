@@ -584,6 +584,7 @@ impl Screen {
                 },
                 initial_events,
                 pipe: None,
+                close_on_outside_click: false,
             });
     }
     fn most_recently_active(&self, candidates: impl Iterator<Item = ClientId>) -> Option<ClientId> {
@@ -657,6 +658,7 @@ impl Screen {
             placement,
             focused,
             false,
+            false,
         );
     }
     pub fn open_prompt_popup(
@@ -668,6 +670,7 @@ impl Screen {
         placement: Option<PromptPlacement>,
         focused: bool,
         capture_all_keys: bool,
+        close_on_outside_click: bool,
     ) {
         let tab_id = match self.active_tab_ids.get(&owner_client_id) {
             Some(tab_id) if self.tabs.contains_key(tab_id) => *tab_id,
@@ -721,6 +724,7 @@ impl Screen {
             pipe_placement,
             focused,
             capture_all_keys,
+            close_on_outside_click,
         );
     }
     fn load_answer_popup(
@@ -734,6 +738,7 @@ impl Screen {
         placement: PipePopupPlacement,
         focused: bool,
         capture_all_keys: bool,
+        close_on_outside_click: bool,
     ) {
         let Some(tab) = self.tabs.get(&tab_id) else {
             return;
@@ -840,6 +845,7 @@ impl Screen {
                 },
                 initial_events: vec![],
                 pipe: Some((popup_request, caller_args)),
+                close_on_outside_click,
             });
     }
     pub fn add_popup(
@@ -853,6 +859,7 @@ impl Screen {
         width: usize,
         height: usize,
         anchor_pane: Option<PaneId>,
+        close_on_outside_click: bool,
     ) -> Result<()> {
         let anchor_still_exists = anchor_pane
             .map(|pane_id| {
@@ -892,6 +899,7 @@ impl Screen {
                     title,
                 )?;
                 tab.set_popup_anchor(plugin_id, anchor_pane);
+                tab.set_popup_close_on_outside_click(plugin_id, close_on_outside_click);
                 tab.hold_back_popup(plugin_id);
                 replaced
             },
