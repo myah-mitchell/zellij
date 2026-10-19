@@ -10,6 +10,7 @@ use crate::plugins::plugin_map::{
     SharedSlot, Subscriptions,
 };
 use crate::plugins::prompt_requests::{PromptAction, PromptCaller, PromptRequests};
+use crate::plugins::settings_entries::SettingsEntries;
 use crate::plugins::shared::{
     add_slot_job, apply_events_job, apply_pipes_job, client_job, host_settings_job,
     remove_slot_job, resize_job, start_instance_job, visibility_job, wasm_module_exports_function,
@@ -303,6 +304,7 @@ pub struct WasmBridge {
     available_layout_errors: Vec<LayoutWithError>,
     available_keybind_presets: Vec<KeybindPresetInfo>,
     available_keybind_preset_errors: Vec<KeybindPresetWithError>,
+    settings_entries: SettingsEntries,
     default_mode: InputMode,
     default_keybinds: SharedKeybinds,
     keybinds: HashMap<ClientId, SharedKeybinds>,
@@ -375,6 +377,7 @@ impl WasmBridge {
             available_layout_errors,
             available_keybind_presets: vec![],
             available_keybind_preset_errors: vec![],
+            settings_entries: SettingsEntries::default(),
             default_mode,
             default_keybinds,
             keybinds: HashMap::new(),
@@ -2632,6 +2635,24 @@ impl WasmBridge {
             )]));
         }
     }
+    pub fn register_settings_entry(
+        &mut self,
+        registered_by: String,
+        label: String,
+        plugin_url: Option<String>,
+        configuration: BTreeMap<String, String>,
+    ) {
+        if self
+            .settings_entries
+            .register(&registered_by, &label, plugin_url, configuration)
+        {
+            let _ = self.senders.send_to_plugin(PluginInstruction::Update(vec![(
+                None,
+                None,
+                Event::PluginSettingsEntries(self.settings_entries.entries()),
+            )]));
+        }
+    }
     pub fn state_update_for_plugin(&self, plugin_id: PluginId) {
         let _ = self.senders.send_to_plugin(PluginInstruction::Update(vec![
             (
@@ -2649,6 +2670,11 @@ impl WasmBridge {
                     self.available_keybind_presets.clone(),
                     self.available_keybind_preset_errors.clone(),
                 ),
+            ),
+            (
+                Some(plugin_id),
+                None,
+                Event::PluginSettingsEntries(self.settings_entries.entries()),
             ),
         ]));
     }
@@ -3370,6 +3396,7 @@ pub fn check_event_permission(
         | Event::CommandChanged(..)
         | Event::AvailableLayoutInfo(..)
         | Event::AvailableKeybindPresets(..)
+        | Event::PluginSettingsEntries(..)
         | Event::PluginConfigurationChanged(..)
         | Event::HighlightClicked { .. }
         | Event::SoftKeyboardVisibilityChanged(..)

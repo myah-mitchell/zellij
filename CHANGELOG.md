@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * fix: grapheme cluster support (https://github.com/zellij-org/zellij/pull/5714)
 * fix: reattaching to a renamed session on Windows (https://github.com/zellij-org/zellij/pull/5513)
 * fix: plugin config editor keeps comments and value spaces, scrolls long option lists (https://github.com/zellij-org/zellij/pull/5729)
+* feat: plugins can register an entry in the settings screen
 
 
 ## [0.45.1] - 2026-08-28

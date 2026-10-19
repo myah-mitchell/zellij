@@ -124,7 +124,7 @@ pub use super::generated_api::api::{
         PluginEntry as ProtobufPluginEntry, PluginMessagePayload, PopupToFloatingPanePayload,
         PromptPayload, ReadConfigPayload, ReadConfigResponse as ProtobufReadConfigResponse,
         RebindKeysPayload, ReconfigurePayload, RegexHighlight as ProtobufRegexHighlight,
-        ReloadPluginPayload, RenameLayoutPayload,
+        RegisterSettingsEntryPayload, ReloadPluginPayload, RenameLayoutPayload,
         RenameLayoutResponse as ProtobufRenameLayoutResponse, RenameTabWithIdPayload,
         RenameWebLoginTokenPayload, RenameWebTokenResponse, ReplacePaneWithExistingPanePayload,
         ReplyToPromptPayload, RequestPluginPermissionPayload, RerunCommandPanePayload,
@@ -2754,6 +2754,16 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for GetSavedSessionPreview"),
             },
+            Some(CommandName::RegisterSettingsEntry) => match protobuf_plugin_command.payload {
+                Some(Payload::RegisterSettingsEntryPayload(payload)) => {
+                    Ok(PluginCommand::RegisterSettingsEntry {
+                        label: payload.label,
+                        plugin_url: payload.plugin_url,
+                        configuration: payload.configuration.into_iter().collect(),
+                    })
+                },
+                _ => Err("Mismatched payload for RegisterSettingsEntry"),
+            },
             Some(CommandName::DeleteThemeFile) => match protobuf_plugin_command.payload {
                 Some(Payload::DeleteThemeFilePayload(name)) => {
                     Ok(PluginCommand::DeleteThemeFile { name })
@@ -4841,6 +4851,20 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 name: CommandName::GetSavedSessionPreview as i32,
                 payload: Some(Payload::GetSavedSessionPreviewPayload(name)),
             }),
+            PluginCommand::RegisterSettingsEntry {
+                label,
+                plugin_url,
+                configuration,
+            } => Ok(ProtobufPluginCommand {
+                name: CommandName::RegisterSettingsEntry as i32,
+                payload: Some(Payload::RegisterSettingsEntryPayload(
+                    RegisterSettingsEntryPayload {
+                        label,
+                        plugin_url,
+                        configuration: configuration.into_iter().collect(),
+                    },
+                )),
+            }),
             PluginCommand::DeleteThemeFile { name } => Ok(ProtobufPluginCommand {
                 name: CommandName::DeleteThemeFile as i32,
                 payload: Some(Payload::DeleteThemeFilePayload(name)),
@@ -5873,6 +5897,33 @@ mod tests {
         let decoded = ProtobufReadConfigResponse::decode(protobuf.encode_to_vec().as_slice())
             .expect("decode bytes");
         assert_eq!(ConfigSnapshot::from(decoded), original);
+    }
+
+    #[test]
+    fn register_settings_entry_protobuf_round_trip() {
+        let mut configuration = BTreeMap::new();
+        configuration.insert("page".to_owned(), "advanced".to_owned());
+        for plugin_url in [None, Some("file:/plugins/status.wasm".to_owned())] {
+            let original = PluginCommand::RegisterSettingsEntry {
+                label: "Status bar".to_owned(),
+                plugin_url: plugin_url.clone(),
+                configuration: configuration.clone(),
+            };
+            let protobuf: ProtobufPluginCommand = original.try_into().expect("encode");
+            let decoded: PluginCommand = protobuf.try_into().expect("decode");
+            match decoded {
+                PluginCommand::RegisterSettingsEntry {
+                    label,
+                    plugin_url: decoded_plugin_url,
+                    configuration: decoded_configuration,
+                } => {
+                    assert_eq!(label, "Status bar");
+                    assert_eq!(decoded_plugin_url, plugin_url);
+                    assert_eq!(decoded_configuration, configuration);
+                },
+                other => panic!("expected RegisterSettingsEntry, got {:?}", other),
+            }
+        }
     }
 
     #[test]

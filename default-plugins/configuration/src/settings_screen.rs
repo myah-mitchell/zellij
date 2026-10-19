@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
+use zellij_tile::prelude::actions::Action;
 use zellij_tile::prelude::*;
+use zellij_utils::input::layout::RunPluginOrAlias;
 
 use crate::blocks_screen::BlockPage;
 use crate::keybindings_screen::KeybindingsScreen;
@@ -41,6 +43,7 @@ const PAGE_CATEGORIES: [Category; 4] = [
     Category::MouseBindings,
     Category::PluginsAndEnvironment,
 ];
+const PLUGIN_ENTRY_HINT: &str = "Press <Enter> to open it in a floating pane.";
 const THEME_NOTE: &str = "  A dark or light terminal theme is set and is used instead of this one";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +124,7 @@ pub struct SettingsScreen {
     menu_screen: BlockPage,
     mousebindings_screen: MousebindingsScreen,
     themes_screen: ThemesScreen,
+    plugin_entries: Vec<PluginSettingsEntry>,
     latest_mode_info: Option<ModeInfo>,
     follow_focus: bool,
     last_size: (usize, usize),
@@ -164,6 +168,7 @@ impl Default for SettingsScreen {
             menu_screen: BlockPage::right_click_menu(),
             mousebindings_screen: MousebindingsScreen::default(),
             themes_screen: ThemesScreen::default(),
+            plugin_entries: vec![],
             latest_mode_info: None,
             follow_focus: false,
             last_size: (0, 0),
@@ -174,6 +179,24 @@ impl Default for SettingsScreen {
             last_mouse: None,
         }
     }
+}
+
+fn launch_action(entry: &PluginSettingsEntry) -> Result<Action, String> {
+    let plugin = RunPluginOrAlias::from_url(
+        &entry.plugin_url,
+        &Some(entry.configuration.clone()),
+        None,
+        None,
+    )?;
+    Ok(Action::LaunchOrFocusPlugin {
+        plugin,
+        should_float: true,
+        move_to_focused_tab: true,
+        should_open_in_place: false,
+        close_replaced_pane: false,
+        skip_cache: false,
+        tab_id: None,
+    })
 }
 
 fn colour_swatch(value: Option<&str>, x: usize, y: usize) -> Option<String> {
@@ -252,10 +275,21 @@ impl SettingsScreen {
         screen
     }
     fn category(&self) -> Category {
+        let selected = self.menu.selected_index();
+        if selected >= CATEGORIES.len() && selected < CATEGORIES.len() + self.plugin_entries.len() {
+            return Category::PluginEntry;
+        }
         CATEGORIES
-            .get(self.menu.selected_index())
+            .get(selected)
             .copied()
             .unwrap_or(Category::Appearance)
+    }
+    fn selected_plugin_entry(&self) -> Option<&PluginSettingsEntry> {
+        if self.search_active || self.category() != Category::PluginEntry {
+            return None;
+        }
+        self.plugin_entries
+            .get(self.menu.selected_index() - CATEGORIES.len())
     }
     fn showing_keys_screen(&self) -> bool {
         !self.search_active && self.category().is_keys_screen()
@@ -404,6 +438,7 @@ impl SettingsScreen {
                     category.title().to_owned()
                 }
             })
+            .chain(self.plugin_entries.iter().map(|entry| entry.label.clone()))
             .collect();
         if labels.as_slice() != self.menu.items() {
             let selected = self.menu.selected_index();
@@ -449,6 +484,14 @@ impl SettingsScreen {
                 .unwrap_or_else(|| "none".to_owned());
             self.rows
                 .push(Row::LabelledHeading("Config folder".to_owned(), folder));
+        }
+        if let Some(entry) = self.selected_plugin_entry() {
+            let rows = [
+                Row::Heading(entry.label.clone()),
+                Row::Line(format!("Plugin: {}", entry.plugin_url)),
+                Row::Line(PLUGIN_ENTRY_HINT.to_owned()),
+            ];
+            self.rows.extend(rows);
         }
         if !self.showing_page() {
             let mut current_heading: Option<String> = None;
@@ -1046,6 +1089,32 @@ impl SettingsScreen {
     ) {
         self.keys_screen.set_presets(presets, preset_errors);
     }
+    pub fn update_plugin_entries(&mut self, entries: Vec<PluginSettingsEntry>) -> bool {
+        if entries == self.plugin_entries {
+            return false;
+        }
+        let was_on_entry = self.menu.selected_index() >= CATEGORIES.len();
+        self.plugin_entries = entries;
+        self.update_menu_labels();
+        if was_on_entry {
+            self.rebuild_rows();
+        }
+        true
+    }
+    fn open_plugin_entry(&mut self) {
+        let Some(entry) = self.selected_plugin_entry() else {
+            return;
+        };
+        match launch_action(entry) {
+            Ok(action) => {
+                run_action(action, BTreeMap::new());
+                self.begin_close();
+            },
+            Err(error) => {
+                self.notice = Some(error);
+            },
+        }
+    }
     pub fn update_mode_info(&mut self, mode_info: ModeInfo) {
         self.keys_screen
             .set_link_color(Some(mode_info.style.colors.text_unselected.emphasis_2));
@@ -1207,6 +1276,15 @@ impl SettingsScreen {
         }
     }
     fn handle_menu_key(&mut self, key: KeyWithModifier) -> bool {
+        if self.selected_plugin_entry().is_some() {
+            if is_plain_key(&key, BareKey::Enter) {
+                self.open_plugin_entry();
+                return true;
+            }
+            if is_plain_key(&key, BareKey::Tab) || is_plain_key(&key, BareKey::Right) {
+                return false;
+            }
+        }
         if is_plain_key(&key, BareKey::Tab)
             || is_plain_key(&key, BareKey::Right)
             || is_plain_key(&key, BareKey::Enter)
@@ -1722,6 +1800,7 @@ impl SettingsScreen {
                         self.menu.handle_mouse(mouse);
                         self.set_focus(Focus::Menu);
                         self.select_category();
+                        self.open_plugin_entry();
                         return true;
                     }
                     if self.search.hit_test(line, column) {
@@ -2229,6 +2308,12 @@ impl SettingsScreen {
             );
         }
         let hints: &[(&str, &str)] = match self.focus {
+            Focus::Menu if self.selected_plugin_entry().is_some() => &[
+                ("<↓↑>", "category"),
+                ("<Enter>", "open"),
+                ("</>", "search"),
+                ("<Esc>", "close"),
+            ],
             Focus::Menu => &[
                 ("<↓↑>", "category"),
                 ("<Tab>", "settings"),
@@ -2604,6 +2689,165 @@ mod tests {
         assert!(!screen.handle_mouse(Mouse::Hover(line, column)));
         assert!(screen.handle_mouse(Mouse::Hover(0, 0)));
         assert!(screen.menu.hovered_index().is_none());
+    }
+
+    fn plugin_entry(label: &str, plugin_url: &str) -> PluginSettingsEntry {
+        PluginSettingsEntry {
+            label: label.to_owned(),
+            plugin_url: plugin_url.to_owned(),
+            configuration: BTreeMap::new(),
+        }
+    }
+
+    fn screen_with_entries(entries: Vec<PluginSettingsEntry>) -> SettingsScreen {
+        let mut screen = SettingsScreen::new();
+        screen.update_plugin_entries(entries);
+        screen
+    }
+
+    fn select_menu_item(screen: &mut SettingsScreen, index: usize) {
+        screen.menu.set_selected(index);
+        screen.select_category();
+    }
+
+    fn plain(bare_key: BareKey) -> KeyWithModifier {
+        KeyWithModifier::new(bare_key)
+    }
+
+    #[test]
+    fn plugin_entries_are_listed_after_the_categories() {
+        let screen = screen_with_entries(vec![
+            plugin_entry("Status bar", "file:/plugins/status.wasm"),
+            plugin_entry("Clock", "clock-alias"),
+        ]);
+        let items = screen.menu.items();
+        assert_eq!(items.len(), CATEGORIES.len() + 2);
+        assert_eq!(items[CATEGORIES.len()], "Status bar");
+        assert_eq!(items[CATEGORIES.len() + 1], "Clock");
+        assert_eq!(items[0], CATEGORIES[0].title());
+    }
+
+    #[test]
+    fn without_plugin_entries_the_menu_is_only_the_categories() {
+        let screen = screen_with_entries(vec![]);
+        assert_eq!(screen.menu.items().len(), CATEGORIES.len());
+    }
+
+    #[test]
+    fn a_selected_plugin_entry_shows_what_it_opens_instead_of_settings() {
+        let mut screen = screen_with_entries(vec![plugin_entry(
+            "Status bar",
+            "file:/plugins/status.wasm",
+        )]);
+        select_menu_item(&mut screen, CATEGORIES.len());
+        assert_eq!(screen.category(), Category::PluginEntry);
+        assert!(screen.elements.is_empty());
+        assert_eq!(
+            screen.rows,
+            vec![
+                Row::Heading("Status bar".to_owned()),
+                Row::Line("Plugin: file:/plugins/status.wasm".to_owned()),
+                Row::Line(PLUGIN_ENTRY_HINT.to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn new_entries_while_one_is_selected_keep_the_selection_on_it() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        select_menu_item(&mut screen, CATEGORIES.len());
+        screen.update_plugin_entries(vec![
+            plugin_entry("Status bar", "status"),
+            plugin_entry("Clock", "clock"),
+        ]);
+        assert_eq!(screen.menu.selected_index(), CATEGORIES.len());
+        assert_eq!(screen.selected_plugin_entry().unwrap().label, "Status bar");
+    }
+
+    #[test]
+    fn updating_plugin_entries_reports_whether_they_changed() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        assert!(!screen.update_plugin_entries(vec![plugin_entry("Status bar", "status")]));
+        assert!(screen.update_plugin_entries(vec![plugin_entry("Clock", "clock")]));
+        assert!(screen.update_plugin_entries(vec![]));
+        assert!(!screen.update_plugin_entries(vec![]));
+    }
+
+    #[test]
+    fn the_down_key_moves_from_the_last_category_into_the_entries() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        select_menu_item(&mut screen, CATEGORIES.len() - 1);
+        assert!(screen.selected_plugin_entry().is_none());
+        screen.handle_key(plain(BareKey::Down));
+        assert_eq!(screen.selected_plugin_entry().unwrap().label, "Status bar");
+    }
+
+    #[test]
+    fn tab_and_right_do_not_leave_the_menu_on_a_plugin_entry() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        select_menu_item(&mut screen, CATEGORIES.len());
+        for bare_key in [BareKey::Tab, BareKey::Right] {
+            screen.handle_key(plain(bare_key));
+            assert_eq!(screen.focus, Focus::Menu);
+        }
+    }
+
+    #[test]
+    fn enter_on_a_plugin_entry_closes_the_settings_after_the_unsaved_notice() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        screen.snapshot.settings = vec![ConfigSettingState {
+            key: SettingKey::WindowOpacity,
+            saved_value: Some("1".to_owned()),
+            current_value: Some("0.9".to_owned()),
+            set_in_file: true,
+        }];
+        select_menu_item(&mut screen, CATEGORIES.len());
+        assert!(!screen.closing);
+        screen.handle_key(plain(BareKey::Enter));
+        assert!(screen.closing);
+        assert!(screen.notice.is_some());
+    }
+
+    #[test]
+    fn enter_on_a_category_still_moves_into_its_settings() {
+        let mut screen = screen_with_entries(vec![plugin_entry("Status bar", "status")]);
+        screen.handle_key(plain(BareKey::Enter));
+        assert_eq!(screen.focus, Focus::Content);
+        assert!(!screen.closing);
+    }
+
+    #[test]
+    fn a_plugin_url_launches_that_plugin_in_a_floating_pane_with_the_configuration() {
+        let mut entry = plugin_entry("Status bar", "file:/plugins/status.wasm");
+        entry
+            .configuration
+            .insert("page".to_owned(), "advanced".to_owned());
+        match launch_action(&entry).unwrap() {
+            Action::LaunchOrFocusPlugin {
+                plugin: RunPluginOrAlias::RunPlugin(run_plugin),
+                should_float,
+                should_open_in_place,
+                ..
+            } => {
+                assert!(should_float);
+                assert!(!should_open_in_place);
+                assert_eq!(run_plugin.location.display(), "file:/plugins/status.wasm");
+                assert_eq!(run_plugin.configuration.inner(), &entry.configuration);
+            },
+            other => panic!("expected a plugin launch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_plugin_alias_launches_through_the_alias() {
+        let entry = plugin_entry("Clock", "clock-alias");
+        match launch_action(&entry).unwrap() {
+            Action::LaunchOrFocusPlugin {
+                plugin: RunPluginOrAlias::Alias(alias),
+                ..
+            } => assert_eq!(alias.name, "clock-alias"),
+            other => panic!("expected an alias launch, got {:?}", other),
+        }
     }
 
     #[test]
