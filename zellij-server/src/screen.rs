@@ -1006,6 +1006,7 @@ pub enum ScreenInstruction {
         width: usize,
         height: usize,
         anchor_pane: Option<PaneId>,
+        close_on_outside_click: bool,
     },
     OpenPipePopup {
         pipe_id: String,
@@ -1022,6 +1023,7 @@ pub enum ScreenInstruction {
         placement: Option<zellij_utils::prompt::PromptPlacement>,
         focused: bool,
         capture_all_keys: bool,
+        close_on_outside_click: bool,
     },
     CloseTopPopup(ClientId),
     ScrollPopup(ClientId, crate::route::PopupScroll),
@@ -14668,6 +14670,7 @@ pub(crate) fn screen_thread_main(
                 width,
                 height,
                 anchor_pane,
+                close_on_outside_click,
             } => {
                 screen.add_popup(
                     plugin_id,
@@ -14679,6 +14682,7 @@ pub(crate) fn screen_thread_main(
                     width,
                     height,
                     anchor_pane,
+                    close_on_outside_click,
                 )?;
                 if let Some(loading_indication) = plugin_loading_message_cache.remove(&plugin_id) {
                     screen.update_plugin_loading_stage(plugin_id, loading_indication);
@@ -14708,6 +14712,7 @@ pub(crate) fn screen_thread_main(
                 placement,
                 focused,
                 capture_all_keys,
+                close_on_outside_click,
             } => {
                 screen.open_prompt_popup(
                     caller,
@@ -14717,6 +14722,7 @@ pub(crate) fn screen_thread_main(
                     placement,
                     focused,
                     capture_all_keys,
+                    close_on_outside_click,
                 );
             },
             ScreenInstruction::CloseTopPopup(client_id) => {

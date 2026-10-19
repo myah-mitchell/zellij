@@ -270,6 +270,7 @@ pub enum PluginInstruction {
         size: Size,
         initial_events: Vec<Event>,
         pipe: Option<(PopupRequest, BTreeMap<String, String>)>,
+        close_on_outside_click: bool,
     },
     PopupBecamePane {
         plugin_id: PluginId,
@@ -498,6 +499,7 @@ pub(crate) fn plugin_thread_main(
                 size,
                 initial_events,
                 pipe,
+                close_on_outside_click,
             } => {
                 run_plugin_or_alias.populate_run_plugin_if_needed(&plugin_aliases);
                 let run_plugin = run_plugin_or_alias.get_run_plugin().or_else(|| {
@@ -527,6 +529,7 @@ pub(crate) fn plugin_thread_main(
                             width: size.cols,
                             height: size.rows,
                             anchor_pane,
+                            close_on_outside_click,
                         }));
                         if !initial_events.is_empty() {
                             wasm_bridge.update_plugins(
@@ -1272,6 +1275,7 @@ pub(crate) fn plugin_thread_main(
                                     placement: request.placement,
                                     focused: request.focused,
                                     capture_all_keys: request.capture_all_keys,
+                                    close_on_outside_click: request.closes_on_outside_click(),
                                 }),
                         );
                     },

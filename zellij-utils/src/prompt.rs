@@ -1125,6 +1125,9 @@ impl PromptRequest {
     pub fn is_notice(&self) -> bool {
         matches!(self.spec, PromptSpec::Notify { .. })
     }
+    pub fn closes_on_outside_click(&self) -> bool {
+        matches!(self.spec, PromptSpec::Menu { .. }) && !self.capture_all_keys
+    }
     pub fn check(&self) -> Result<(), String> {
         if self.element != self.spec.element() {
             return Err(format!(
@@ -1543,6 +1546,15 @@ pub fn parse_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_menu_that_does_not_capture_all_keys_closes_on_an_outside_click() {
+        assert!(PromptRequest::menu(["a", "b"]).closes_on_outside_click());
+        assert!(!PromptRequest::menu(["a", "b"])
+            .capture_all_keys(true)
+            .closes_on_outside_click());
+        assert!(!PromptRequest::confirm("Sure?").closes_on_outside_click());
+    }
 
     #[test]
     fn durations_accept_common_units() {
