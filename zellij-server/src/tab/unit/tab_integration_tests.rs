@@ -13392,6 +13392,47 @@ fn click_outside_a_prompt_popup_is_ignored() {
 }
 
 #[test]
+fn click_outside_a_prompt_menu_requests_close_but_other_prompts_ignore_it() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 1;
+    let mut tab = create_new_tab(size, ModeInfo::default());
+    let (plugin_sender, _plugin_receiver) = channels::unbounded();
+    tab.senders
+        .replace_to_plugin(SenderWithContext::new(plugin_sender));
+    open_test_prompt_popup(&mut tab, client_id, 42, 2);
+    open_test_prompt_popup(&mut tab, client_id, 43, 8);
+    tab.set_popup_close_on_outside_click(43, true);
+    tab.set_popup_kind(43, crate::tab::PopupKind::Prompt);
+    let outside = Position::new(15, 80);
+    for press in [
+        MouseEvent::new_left_press_event(outside),
+        MouseEvent::new_right_press_event(outside),
+        MouseEvent::new_middle_press_event(outside),
+    ] {
+        assert_eq!(
+            tab.handle_popup_mouse_event(&press, client_id),
+            Some(crate::tab::PopupMouseOutcome::CloseRequested)
+        );
+    }
+    assert_eq!(
+        tab.handle_popup_mouse_event(
+            &MouseEvent::new_left_press_event(Position::new(9, 5)),
+            client_id
+        ),
+        Some(crate::tab::PopupMouseOutcome::Consumed)
+    );
+    assert_eq!(tab.close_top_popup(client_id), Some(43));
+    assert_eq!(
+        tab.handle_popup_mouse_event(&MouseEvent::new_right_press_event(outside), client_id),
+        Some(crate::tab::PopupMouseOutcome::Consumed)
+    );
+    assert_eq!(tab.popup_plugin_id(client_id), Some(42));
+}
+
+#[test]
 fn prompt_popup_centered_in_a_pane_stays_centered_when_resized() {
     let size = Size {
         cols: 121,
