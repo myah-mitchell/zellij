@@ -46,13 +46,13 @@ keep = 7
 tag = "fork-v{version}"
 version = "0.46.4"
 base = "upstream:main"
-stack = ["feat/config-alias-per-key-edit"]
+stack = []
 
 # EA's of this fork's own release.
 [build.fork-ea]
 tag = "fork-ea-v{version}-{date}"
 version = "0.46.4"
 base = "upstream:main"
-stack = ["feat/config-alias-per-key-edit", "fix/plugin-menu-outside-click", "feat/plugin-settings-entries"]
+stack = ["fix/plugin-menu-outside-click", "feat/plugin-settings-entries"]
 targets = ["linux-musl"]
 prerelease = true
