@@ -623,6 +623,7 @@ pub enum PluginContext {
     LayoutListUpdate,
     KeybindPresetListUpdate,
     RequestStateUpdateForPlugin,
+    RegisterSettingsEntry,
     UpdateSessionSaveTime,
     GetLastSessionSaveTime,
     DetectPluginConfigChanges,

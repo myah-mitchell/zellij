@@ -4,6 +4,7 @@ mod plugin_loader;
 mod plugin_map;
 mod plugin_worker;
 mod prompt_requests;
+mod settings_entries;
 mod shared;
 mod wasm_bridge;
 mod watch_filesystem;
@@ -246,6 +247,13 @@ pub enum PluginInstruction {
     LayoutListUpdate(Vec<LayoutInfo>, Vec<LayoutWithError>),
     KeybindPresetListUpdate(Vec<KeybindPresetInfo>, Vec<KeybindPresetWithError>),
     RequestStateUpdateForPlugin(PluginId),
+    RegisterSettingsEntry {
+        // the location of the plugin that is registering the entry
+        registered_by: String,
+        label: String,
+        plugin_url: Option<String>,
+        configuration: BTreeMap<String, String>,
+    },
     UpdateSessionSaveTime(u64), // u64 = milliseconds since UNIX epoch
     GetLastSessionSaveTime {
         response_channel: crossbeam::channel::Sender<Option<u64>>,
@@ -352,6 +360,7 @@ impl From<&PluginInstruction> for PluginContext {
             PluginInstruction::RequestStateUpdateForPlugin(..) => {
                 PluginContext::RequestStateUpdateForPlugin
             },
+            PluginInstruction::RegisterSettingsEntry { .. } => PluginContext::RegisterSettingsEntry,
             PluginInstruction::UpdateSessionSaveTime(..) => PluginContext::UpdateSessionSaveTime,
             PluginInstruction::GetLastSessionSaveTime { .. } => {
                 PluginContext::GetLastSessionSaveTime
@@ -1587,6 +1596,19 @@ pub(crate) fn plugin_thread_main(
             },
             PluginInstruction::RequestStateUpdateForPlugin(plugin_id) => {
                 wasm_bridge.state_update_for_plugin(plugin_id);
+            },
+            PluginInstruction::RegisterSettingsEntry {
+                registered_by,
+                label,
+                plugin_url,
+                configuration,
+            } => {
+                wasm_bridge.register_settings_entry(
+                    registered_by,
+                    label,
+                    plugin_url,
+                    configuration,
+                );
             },
             PluginInstruction::UpdateSessionSaveTime(timestamp_millis) => {
                 // Store timestamp in WasmBridge (as Unix epoch for internal use)

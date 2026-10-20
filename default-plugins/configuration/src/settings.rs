@@ -18,6 +18,8 @@ pub enum Category {
     Web,
     PluginsAndEnvironment,
     FoldersAndFiles,
+    /// The menu items plugins registered, not in `CATEGORIES`.
+    PluginEntry,
 }
 
 pub const CATEGORIES: [Category; 16] = [
@@ -58,6 +60,7 @@ impl Category {
             Category::Web => "Web",
             Category::PluginsAndEnvironment => "Plugins and environment",
             Category::FoldersAndFiles => "Files and folders",
+            Category::PluginEntry => "Plugin",
         }
     }
     pub fn is_keys_screen(&self) -> bool {
@@ -73,7 +76,7 @@ impl Category {
         )
     }
     pub fn has_rows(&self) -> bool {
-        !self.is_keys_screen() && !self.is_page()
+        !self.is_keys_screen() && !self.is_page() && *self != Category::PluginEntry
     }
 }
 

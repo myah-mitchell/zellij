@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * fix: plugin config editor keeps comments and value spaces, scrolls long option lists (https://github.com/zellij-org/zellij/pull/5729)
 * fix: replay cached startup events to background plugins (https://github.com/zellij-org/zellij/pull/5706)
 * fix: busy-loop and log spam on dangling symlinks in layout/config folders (https://github.com/zellij-org/zellij/pull/5731)
+* feat: plugins can register an entry in the settings screen
 
 
 ## [0.45.1] - 2026-08-28

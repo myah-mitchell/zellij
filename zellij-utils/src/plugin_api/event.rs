@@ -41,7 +41,10 @@ pub use super::generated_api::api::{
         PaneRenderReportPayload as ProtobufPaneRenderReportPayload,
         PaneScrollbackResponse as ProtobufPaneScrollbackResponse, PaneType as ProtobufPaneType,
         PluginConfigurationChangedPayload as ProtobufPluginConfigurationChangedPayload,
-        PluginInfo as ProtobufPluginInfo, PromptResultPayload as ProtobufPromptResultPayload,
+        PluginInfo as ProtobufPluginInfo,
+        PluginSettingsEntriesPayload as ProtobufPluginSettingsEntriesPayload,
+        PluginSettingsEntry as ProtobufPluginSettingsEntry,
+        PromptResultPayload as ProtobufPromptResultPayload,
         ResurrectableSession as ProtobufResurrectableSession, SelectedText as ProtobufSelectedText,
         SessionManifest as ProtobufSessionManifest,
         SoftKeyboardVisibilityChangedPayload as ProtobufSoftKeyboardVisibilityChangedPayload,
@@ -66,8 +69,8 @@ use crate::data::{
     LayoutMetadata, ModeInfo, Mouse, NestedSessionEndReason, NestedSessionKeybinds,
     NestedSessionKeybindsError, NestedSessionKeybindsResponse, PaneContents, PaneId, PaneInfo,
     PaneManifest, PaneMetadata, PaneScrollbackResponse, PermissionStatus, PluginCapabilities,
-    PluginInfo, SelectedText, SessionInfo, SettingKey, Style, StyledText, TabInfo, TabMetadata,
-    WebServerStatus, WebSharing,
+    PluginInfo, PluginSettingsEntry, SelectedText, SessionInfo, SettingKey, Style, StyledText,
+    TabInfo, TabMetadata, WebServerStatus, WebSharing,
 };
 
 use crate::errors::prelude::*;
@@ -603,6 +606,14 @@ impl TryFrom<ProtobufEvent> for Event {
                     Ok(Event::SavedSessionPreview(payload.into()))
                 },
                 _ => Err("Malformed payload for the SavedSessionPreview Event"),
+            },
+            Some(ProtobufEventType::PluginSettingsEntries) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::PluginSettingsEntriesPayload(payload)) => {
+                    Ok(Event::PluginSettingsEntries(
+                        payload.entries.into_iter().map(Into::into).collect(),
+                    ))
+                },
+                _ => Err("Malformed payload for the PluginSettingsEntries Event"),
             },
             Some(ProtobufEventType::PromptResult) => match protobuf_event.payload {
                 Some(ProtobufEventPayload::PromptResultPayload(payload)) => {
@@ -1349,6 +1360,14 @@ impl TryFrom<Event> for ProtobufEvent {
             Event::SavedSessionPreview(preview) => Ok(ProtobufEvent {
                 name: ProtobufEventType::SavedSessionPreview as i32,
                 payload: Some(event::Payload::SavedSessionPreviewPayload(preview.into())),
+            }),
+            Event::PluginSettingsEntries(entries) => Ok(ProtobufEvent {
+                name: ProtobufEventType::PluginSettingsEntries as i32,
+                payload: Some(event::Payload::PluginSettingsEntriesPayload(
+                    ProtobufPluginSettingsEntriesPayload {
+                        entries: entries.into_iter().map(Into::into).collect(),
+                    },
+                )),
             }),
             Event::PromptResult(request_id, result) => Ok(ProtobufEvent {
                 name: ProtobufEventType::PromptResult as i32,
@@ -2698,6 +2717,7 @@ impl TryFrom<ProtobufEventType> for EventType {
             ProtobufEventType::TerminalCommandSubmitted => EventType::TerminalCommandSubmitted,
             ProtobufEventType::SessionPreview => EventType::SessionPreview,
             ProtobufEventType::SavedSessionPreview => EventType::SavedSessionPreview,
+            ProtobufEventType::PluginSettingsEntries => EventType::PluginSettingsEntries,
         })
     }
 }
@@ -2769,6 +2789,7 @@ impl TryFrom<EventType> for ProtobufEventType {
             EventType::TerminalCommandSubmitted => ProtobufEventType::TerminalCommandSubmitted,
             EventType::SessionPreview => ProtobufEventType::SessionPreview,
             EventType::SavedSessionPreview => ProtobufEventType::SavedSessionPreview,
+            EventType::PluginSettingsEntries => ProtobufEventType::PluginSettingsEntries,
         })
     }
 }
@@ -4162,6 +4183,26 @@ fn event_from_protobuf_bytes_matches_full_decoding() {
         assert_eq!(event_from_protobuf_bytes(&bytes).unwrap(), fully_decoded);
     }
 }
+impl From<PluginSettingsEntry> for ProtobufPluginSettingsEntry {
+    fn from(entry: PluginSettingsEntry) -> Self {
+        ProtobufPluginSettingsEntry {
+            label: entry.label,
+            plugin_url: entry.plugin_url,
+            configuration: entry.configuration.into_iter().collect(),
+        }
+    }
+}
+
+impl From<ProtobufPluginSettingsEntry> for PluginSettingsEntry {
+    fn from(entry: ProtobufPluginSettingsEntry) -> Self {
+        PluginSettingsEntry {
+            label: entry.label,
+            plugin_url: entry.plugin_url,
+            configuration: entry.configuration.into_iter().collect(),
+        }
+    }
+}
+
 impl From<KeybindPresetInfo> for ProtobufKeybindPresetInfo {
     fn from(info: KeybindPresetInfo) -> Self {
         ProtobufKeybindPresetInfo {
@@ -4382,6 +4423,51 @@ mod mouse_event_tests {
             let decoded: Mouse = payload.try_into().expect("decode");
             assert_eq!(decoded, event);
         }
+    }
+}
+
+#[cfg(test)]
+mod plugin_settings_entries_tests {
+    use super::*;
+
+    fn round_trip(event: Event) -> Event {
+        let protobuf = ProtobufEvent::try_from(event).unwrap();
+        Event::try_from(protobuf).unwrap()
+    }
+
+    #[test]
+    fn plugin_settings_entries_survive_the_protobuf_round_trip() {
+        let mut configuration = BTreeMap::new();
+        configuration.insert("page".to_owned(), "advanced".to_owned());
+        configuration.insert("empty".to_owned(), "".to_owned());
+        let event = Event::PluginSettingsEntries(vec![
+            PluginSettingsEntry {
+                label: "Status bar".to_owned(),
+                plugin_url: "file:/plugins/status.wasm".to_owned(),
+                configuration,
+            },
+            PluginSettingsEntry {
+                label: "Aliased".to_owned(),
+                plugin_url: "my-alias".to_owned(),
+                configuration: BTreeMap::new(),
+            },
+        ]);
+        assert_eq!(round_trip(event.clone()), event);
+    }
+
+    #[test]
+    fn an_empty_list_of_entries_survives_the_protobuf_round_trip() {
+        let event = Event::PluginSettingsEntries(vec![]);
+        assert_eq!(round_trip(event.clone()), event);
+    }
+
+    #[test]
+    fn the_event_type_survives_the_protobuf_round_trip() {
+        let protobuf = ProtobufEventType::try_from(EventType::PluginSettingsEntries).unwrap();
+        assert_eq!(
+            EventType::try_from(protobuf).unwrap(),
+            EventType::PluginSettingsEntries
+        );
     }
 }
 

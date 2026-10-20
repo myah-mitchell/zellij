@@ -13745,3 +13745,232 @@ pub fn plugin_unloaded_while_loading_does_not_run_once_loaded() {
         "the plugin keeps running after being unloaded while it was loading"
     );
 }
+
+enum SettingsEntriesStep {
+    Load(BTreeMap<String, String>),
+    SendRegisterKey,
+}
+
+fn run_settings_entries_scenario(
+    steps: Vec<SettingsEntriesStep>,
+    done: impl Fn(&[(u32, String)]) -> bool,
+) -> Vec<(u32, String)> {
+    let temp_folder = tempdir().unwrap();
+    let plugin_host_folder = PathBuf::from(temp_folder.path());
+    let cache_path = plugin_host_folder.join("permissions_test.kdl");
+    let (plugin_thread_sender, screen_receiver, teardown) =
+        create_plugin_thread(Some(plugin_host_folder), None);
+    let client_id = 1;
+    let size = Size {
+        cols: 300,
+        rows: 20,
+    };
+    let mut rendered: Vec<(u32, String)> = vec![];
+    let mut granted_plugins = 0;
+    // waits for the screen thread messages until `until` holds or the deadline passes, granting
+    // permissions along the way
+    let receive_until = |rendered: &mut Vec<(u32, String)>,
+                         granted_plugins: &mut usize,
+                         until: &dyn Fn(&[(u32, String)], usize) -> bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && !until(rendered, *granted_plugins) {
+            match screen_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok((ScreenInstruction::RequestPluginPermissions(plugin_id, permissions), _)) => {
+                    let _ = plugin_thread_sender.send(PluginInstruction::PermissionRequestResult(
+                        plugin_id,
+                        Some(client_id),
+                        permissions.permissions,
+                        PermissionStatus::Granted,
+                        Some(cache_path.clone()),
+                    ));
+                    *granted_plugins += 1;
+                },
+                Ok((ScreenInstruction::PluginBytes(plugin_render_assets), _)) => {
+                    for asset in plugin_render_assets {
+                        let bytes = String::from_utf8_lossy(&asset.bytes).to_string();
+                        rendered.push((asset.plugin_id, bytes));
+                    }
+                },
+                _ => {},
+            }
+        }
+    };
+
+    let _ = plugin_thread_sender.send(PluginInstruction::AddClient(client_id));
+    let mut loaded_plugins = 0;
+    let mut register_keys_sent = 0;
+    for (index, step) in steps.into_iter().enumerate() {
+        match step {
+            SettingsEntriesStep::Load(configuration) => {
+                let run_plugin = RunPluginOrAlias::RunPlugin(RunPlugin {
+                    _allow_exec_host_cmd: false,
+                    location: RunPluginLocation::File(PathBuf::from(&*PLUGIN_FIXTURE)),
+                    configuration: PluginUserConfiguration::new(configuration),
+                    ..Default::default()
+                });
+                let _ = plugin_thread_sender.send(PluginInstruction::Load(
+                    Some(false),
+                    false,
+                    false,
+                    Some(format!("plugin_{}", index)),
+                    run_plugin,
+                    Some(1),
+                    None,
+                    client_id,
+                    size,
+                    None,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                ));
+                loaded_plugins += 1;
+                // a registration made before the permission is granted is dropped
+                receive_until(&mut rendered, &mut granted_plugins, &|_, granted| {
+                    granted >= loaded_plugins
+                });
+            },
+            SettingsEntriesStep::SendRegisterKey => {
+                let _ = plugin_thread_sender.send(PluginInstruction::Update(vec![(
+                    None,
+                    Some(client_id),
+                    Event::Key(
+                        KeyWithModifier::new(BareKey::Char('n'))
+                            .with_ctrl_modifier()
+                            .with_alt_modifier(),
+                    ),
+                )]));
+                register_keys_sent += 1;
+                // once the plugin rendered the key, its registration is queued ahead of the next
+                // step
+                receive_until(&mut rendered, &mut granted_plugins, &|rendered, _| {
+                    rendered
+                        .iter()
+                        .any(|(_, bytes)| bytes.matches("Char('n')").count() >= register_keys_sent)
+                });
+            },
+        }
+    }
+    receive_until(&mut rendered, &mut granted_plugins, &|rendered, _| {
+        done(rendered)
+    });
+    teardown();
+    rendered
+}
+
+fn subscribing_to_settings_entries() -> BTreeMap<String, String> {
+    let mut configuration = BTreeMap::new();
+    configuration.insert("subscribe_settings_entries".to_owned(), "true".to_owned());
+    configuration
+}
+
+fn settings_entry_lines(rendered: &[(u32, String)]) -> Vec<String> {
+    rendered
+        .iter()
+        .filter_map(|(_, bytes)| {
+            bytes
+                .lines()
+                .find(|line| line.contains("Settings entries:"))
+                .map(|line| line.trim().to_owned())
+        })
+        .collect()
+}
+
+#[test]
+#[ignore]
+pub fn register_settings_entry_reaches_a_subscribed_plugin_with_the_callers_url_by_default() {
+    let expected = format!(
+        "Settings entries: Fixture entry -> file:{} {{\"from\": \"fixture\", \"registration\": \"1\"}}",
+        &*PLUGIN_FIXTURE
+    );
+    let rendered = run_settings_entries_scenario(
+        vec![
+            SettingsEntriesStep::Load(subscribing_to_settings_entries()),
+            SettingsEntriesStep::SendRegisterKey,
+        ],
+        |rendered| settings_entry_lines(rendered).contains(&expected),
+    );
+    assert!(
+        settings_entry_lines(&rendered).contains(&expected),
+        "expected the subscribed plugin to render {:?}, rendered: {:?}",
+        expected,
+        rendered
+    );
+}
+
+#[test]
+#[ignore]
+pub fn register_settings_entry_uses_the_given_plugin_url() {
+    let mut configuration = subscribing_to_settings_entries();
+    configuration.insert("settings_entry_url".to_owned(), "my-alias".to_owned());
+    let uses_the_alias = |rendered: &[(u32, String)]| {
+        settings_entry_lines(rendered)
+            .iter()
+            .any(|line| line.contains("Fixture entry -> my-alias"))
+    };
+    let rendered = run_settings_entries_scenario(
+        vec![
+            SettingsEntriesStep::Load(configuration),
+            SettingsEntriesStep::SendRegisterKey,
+        ],
+        uses_the_alias,
+    );
+    assert!(
+        uses_the_alias(&rendered),
+        "expected the explicit url to be used, rendered: {:?}",
+        rendered
+    );
+}
+
+#[test]
+#[ignore]
+pub fn register_settings_entry_is_sent_to_a_plugin_that_loads_afterwards() {
+    let received_the_entry = |rendered: &[(u32, String)]| {
+        settings_entry_lines(rendered)
+            .iter()
+            .any(|line| line.contains("Fixture entry -> file:"))
+    };
+    let rendered = run_settings_entries_scenario(
+        vec![
+            SettingsEntriesStep::Load(BTreeMap::new()),
+            SettingsEntriesStep::SendRegisterKey,
+            SettingsEntriesStep::Load(subscribing_to_settings_entries()),
+        ],
+        received_the_entry,
+    );
+    assert!(
+        received_the_entry(&rendered),
+        "expected the late plugin to receive the entry on load, rendered: {:?}",
+        rendered
+    );
+}
+
+#[test]
+#[ignore]
+pub fn register_settings_entry_twice_from_the_same_plugin_keeps_one_entry() {
+    let saw_the_second_registration = |rendered: &[(u32, String)]| {
+        settings_entry_lines(rendered)
+            .iter()
+            .any(|line| line.contains("\"registration\": \"2\""))
+    };
+    let rendered = run_settings_entries_scenario(
+        vec![
+            SettingsEntriesStep::Load(subscribing_to_settings_entries()),
+            SettingsEntriesStep::SendRegisterKey,
+            SettingsEntriesStep::SendRegisterKey,
+        ],
+        saw_the_second_registration,
+    );
+    assert!(
+        saw_the_second_registration(&rendered),
+        "the second registration never reached the subscribed plugin: {:?}",
+        rendered
+    );
+    let lines = settings_entry_lines(&rendered);
+    assert!(
+        lines.iter().all(|line| !line.contains(" | ")),
+        "a repeated registration was listed twice: {:?}",
+        lines
+    );
+}

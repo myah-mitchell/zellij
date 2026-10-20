@@ -86,6 +86,7 @@ enum EventType {
     TerminalCommandSubmitted = 60;
     SessionPreview = 61;
     SavedSessionPreview = 62;
+    PluginSettingsEntries = 63;
 }
 
 message EventNameList {
@@ -148,7 +149,18 @@ message Event {
     FolderSessionsUpdatePayload folder_sessions_update_payload = 52;
     SessionPreviewPayload session_preview_payload = 53;
     SavedSessionPreviewPayload saved_session_preview_payload = 54;
+    PluginSettingsEntriesPayload plugin_settings_entries_payload = 55;
   }
+}
+
+message PluginSettingsEntry {
+  string label = 1;
+  string plugin_url = 2;
+  map<string, string> configuration = 3;
+}
+
+message PluginSettingsEntriesPayload {
+  repeated PluginSettingsEntry entries = 1;
 }
 
 message PromptResultPayload {

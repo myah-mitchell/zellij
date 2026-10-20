@@ -19,6 +19,7 @@ struct State {
     message_to_plugin_payload: Option<String>,
     explicit_string_to_render: Option<String>,
     prompt_result: Option<String>,
+    settings_entry_registrations: usize,
 }
 
 #[cfg(target_family = "wasm")]
@@ -122,6 +123,10 @@ impl ZellijPlugin for State {
             .get("subscribe_nested_session_events")
             .map(|v| v == "true")
             .unwrap_or(false);
+        let should_subscribe_settings_entries = configuration
+            .get("subscribe_settings_entries")
+            .map(|v| v == "true")
+            .unwrap_or(false);
         self.configuration = configuration;
         subscribe(&[
             EventType::InputReceived,
@@ -147,6 +152,9 @@ impl ZellijPlugin for State {
                 EventType::NestedSessionModeUpdate,
                 EventType::NestedSessionEnded,
             ]);
+        }
+        if should_subscribe_settings_entries {
+            subscribe(&[EventType::PluginSettingsEntries]);
         }
         watch_filesystem();
     }
@@ -1030,7 +1038,33 @@ impl ZellijPlugin for State {
                             });
                     }
                 },
+                BareKey::Char('n')
+                    if key.has_only_modifiers(&[KeyModifier::Ctrl, KeyModifier::Alt]) =>
+                {
+                    self.settings_entry_registrations += 1;
+                    let plugin_url = self.configuration.get("settings_entry_url").cloned();
+                    let mut configuration = BTreeMap::new();
+                    configuration.insert("from".to_owned(), "fixture".to_owned());
+                    configuration.insert(
+                        "registration".to_owned(),
+                        self.settings_entry_registrations.to_string(),
+                    );
+                    register_settings_entry("Fixture entry", plugin_url, configuration);
+                },
                 _ => {},
+            },
+            Event::PluginSettingsEntries(entries) => {
+                self.explicit_string_to_render = Some(format!(
+                    "Settings entries: {}",
+                    entries
+                        .iter()
+                        .map(|entry| format!(
+                            "{} -> {} {:?}",
+                            entry.label, entry.plugin_url, entry.configuration
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ));
             },
             Event::NestedSessionModeUpdate {
                 pane_id,
