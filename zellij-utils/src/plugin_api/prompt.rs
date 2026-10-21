@@ -351,6 +351,7 @@ impl From<PromptRequest> for ProtobufPromptRequest {
             placement: request.placement.map(Into::into),
             focused: request.focused,
             capture_all_keys: request.capture_all_keys,
+            close_on_outside_click: request.close_on_outside_click,
             spec: Some(request.spec.into()),
         }
     }
@@ -371,6 +372,7 @@ impl TryFrom<ProtobufPromptRequest> for PromptRequest {
             },
             focused: request.focused,
             capture_all_keys: request.capture_all_keys,
+            close_on_outside_click: request.close_on_outside_click,
             spec: request
                 .spec
                 .ok_or("Prompt request without a spec")?
@@ -482,7 +484,8 @@ mod tests {
             ])
             .remember("Always do this")
             .padded()
-            .capture_all_keys(true),
+            .capture_all_keys(true)
+            .close_on_outside_click(true),
         );
         round_trip_request(
             PromptRequest::confirm("Go?")

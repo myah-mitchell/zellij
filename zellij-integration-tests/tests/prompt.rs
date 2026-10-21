@@ -403,6 +403,7 @@ fn pipe_action(
         plugin_title: None,
         popup,
         popup_no_focus: false,
+        popup_close_on_outside_click: false,
     }
 }
 
@@ -422,6 +423,61 @@ fn pipe_to_the_prompt_plugin_keeps_its_exit_codes() {
     wait_for_prompt_showing(&zellij, "Piped question?");
     zellij.send_stdin(&keys::ESC);
     assert_eq!(pipe.wait_for_exit().exit_code, 1);
+    zellij.quit();
+}
+
+const CLICK_OUTSIDE_THE_POPUP: &[u8] = b"\x1b[<0;3;3M\x1b[<0;3;3m";
+
+fn start_with_mouse_and_terminal() -> (TestSession, FakePtyHandle) {
+    let zellij = TestRunner::new(TERMINAL_SIZE)
+        .with_config("mouse_mode true")
+        .start();
+    let terminal = claim_first_terminal_and_wait_for_prompt(&zellij);
+    (zellij, terminal)
+}
+
+#[test]
+fn a_click_outside_a_prompt_cancels_it_only_with_close_on_outside_click() {
+    let (mut zellij, terminal) = start_with_mouse_and_terminal();
+    let prompt = zellij.run_prompt(&["choose", "kept-item"], from(&terminal));
+    wait_for_prompt_showing(&zellij, "kept-item");
+    zellij.send_stdin(CLICK_OUTSIDE_THE_POPUP);
+    zellij.send_stdin(&keys::ENTER);
+    answered(&prompt.wait_for_exit(), 0, "kept-item\n");
+    wait_for_prompts_to_close(&zellij);
+    let prompt = zellij.run_prompt(
+        &["choose", "dropped-item", "--close-on-outside-click"],
+        from(&terminal),
+    );
+    wait_for_prompt_showing(&zellij, "dropped-item");
+    zellij.send_stdin(CLICK_OUTSIDE_THE_POPUP);
+    answered(&prompt.wait_for_exit(), 1, "");
+    wait_for_prompts_to_close(&zellij);
+    zellij.quit();
+}
+
+#[test]
+fn a_click_outside_a_pipe_popup_closes_it_with_popup_close_on_outside_click() {
+    let (mut zellij, terminal) = start_with_mouse_and_terminal();
+    let mut action = pipe_action(
+        "confirm",
+        None,
+        Some("zellij:prompt"),
+        Some("message=Piped question?"),
+        Some(PipePopupPlacement::Center),
+    );
+    if let CliAction::Pipe {
+        popup_close_on_outside_click,
+        ..
+    } = &mut action
+    {
+        *popup_close_on_outside_click = true;
+    }
+    let pipe = zellij.run_cli_pipe(action, from(&terminal));
+    wait_for_prompt_showing(&zellij, "Piped question?");
+    zellij.send_stdin(CLICK_OUTSIDE_THE_POPUP);
+    assert_eq!(pipe.wait_for_exit().exit_code, 1);
+    wait_for_prompts_to_close(&zellij);
     zellij.quit();
 }
 

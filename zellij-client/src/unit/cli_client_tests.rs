@@ -135,6 +135,7 @@ fn pipe_action(payload: Option<&str>) -> Action {
         pane_title: None,
         popup: None,
         popup_no_focus: false,
+        popup_close_on_outside_click: false,
     }
 }
 
@@ -458,6 +459,20 @@ fn placement_flags_choose_where_the_popup_opens() {
 }
 
 #[test]
+fn a_prompt_closes_on_an_outside_click_only_when_asked() {
+    assert!(
+        !prompt_cli(&["menu", "a", "b"])
+            .answer_args()
+            .close_on_outside_click
+    );
+    assert!(
+        prompt_cli(&["menu", "a", "b", "--close-on-outside-click"])
+            .answer_args()
+            .close_on_outside_click
+    );
+}
+
+#[test]
 fn notify_defaults_to_the_top_right_corner_and_does_not_take_focus() {
     use zellij_utils::data::PipePopupPlacement;
     let notify = prompt_cli(&["notify", "Build finished"]);
@@ -476,7 +491,13 @@ fn notify_defaults_to_the_top_right_corner_and_does_not_take_focus() {
 
 #[test]
 fn notify_does_not_take_the_answer_and_placement_flags() {
-    for flag in ["--json", "--at-cursor", "--at-mouse", "--at-center"] {
+    for flag in [
+        "--json",
+        "--at-cursor",
+        "--at-mouse",
+        "--at-center",
+        "--close-on-outside-click",
+    ] {
         assert!(
             <PromptCli as clap::Parser>::try_parse_from(["prompt", "notify", "x", flag]).is_err(),
             "{}",
@@ -513,6 +534,7 @@ fn notify_does_not_take_the_answer_and_placement_flags() {
         "--at-mouse",
         "--at-center",
         "--default",
+        "--close-on-outside-click",
     ] {
         assert!(!help.contains(flag), "{}: {}", flag, help);
     }

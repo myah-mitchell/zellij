@@ -593,6 +593,8 @@ pub enum Action {
         popup: Option<crate::data::PipePopupPlacement>,
         #[serde(default)]
         popup_no_focus: bool,
+        #[serde(default)]
+        popup_close_on_outside_click: bool,
     },
     KeybindPipe {
         name: Option<String>,
@@ -2172,6 +2174,7 @@ impl Action {
                 plugin_title,
                 popup,
                 popup_no_focus,
+                popup_close_on_outside_click,
             } => {
                 let current_dir = get_current_dir();
                 let cwd = plugin_cwd
@@ -2195,6 +2198,7 @@ impl Action {
                     skip_cache,
                     popup,
                     popup_no_focus,
+                    popup_close_on_outside_click,
                 }])
             },
             CliAction::ListClients => Ok(vec![Action::ListClients]),

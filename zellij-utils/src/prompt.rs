@@ -903,6 +903,7 @@ pub struct PromptRequest {
     pub placement: Option<PromptPlacement>,
     pub focused: bool,
     pub capture_all_keys: bool,
+    pub close_on_outside_click: bool,
     pub spec: PromptSpec,
 }
 
@@ -916,6 +917,7 @@ impl PromptRequest {
             placement: None,
             focused: !matches!(spec, PromptSpec::Notify { .. }),
             capture_all_keys: false,
+            close_on_outside_click: false,
             spec,
         }
     }
@@ -1061,6 +1063,10 @@ impl PromptRequest {
     }
     pub fn capture_all_keys(mut self, capture_all_keys: bool) -> Self {
         self.capture_all_keys = capture_all_keys;
+        self
+    }
+    pub fn close_on_outside_click(mut self, close_on_outside_click: bool) -> Self {
+        self.close_on_outside_click = close_on_outside_click;
         self
     }
     pub fn yes(mut self, label: impl Into<String>) -> Self {

@@ -1052,6 +1052,7 @@ pub enum ScreenInstruction {
         caller_pane_id: Option<PaneId>,
         placement: zellij_utils::data::PipePopupPlacement,
         focused: bool,
+        closes_on_outside_click: bool,
     },
     OpenPromptPopup {
         caller: crate::plugins::PromptCaller,
@@ -15253,6 +15254,7 @@ pub(crate) fn screen_thread_main(
                 caller_pane_id,
                 placement,
                 focused,
+                closes_on_outside_click,
             } => {
                 screen.open_pipe_popup(
                     pipe_id,
@@ -15260,6 +15262,7 @@ pub(crate) fn screen_thread_main(
                     caller_pane_id,
                     placement,
                     focused,
+                    closes_on_outside_click,
                 );
             },
             ScreenInstruction::OpenPromptPopup {

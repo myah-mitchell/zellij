@@ -2121,6 +2121,7 @@ fn route_action_with_origin(
             pane_title,
             popup,
             popup_no_focus,
+            popup_close_on_outside_click,
             ..
         } => {
             drop(completion_tx); // releasing pipes is handled by the plugins, so we don't want
@@ -2159,6 +2160,7 @@ fn route_action_with_origin(
                         caller_pane_id: pane_id,
                         popup,
                         popup_focused: !popup_no_focus,
+                        popup_close_on_outside_click,
                     })
                     .with_context(err_context)?;
             } else {

@@ -233,6 +233,12 @@ pub struct PromptAnswerArgs {
         help = "Open the popup in the middle of the screen instead of over the calling pane (e.g. --at-center)"
     )]
     pub at_center: bool,
+
+    #[clap(
+        long,
+        help = "Cancel the prompt when the user clicks outside the popup (e.g. --close-on-outside-click)"
+    )]
+    pub close_on_outside_click: bool,
 }
 
 impl PromptCli {
@@ -1982,6 +1988,15 @@ tail -f /tmp/my-live-logfile | zellij action pipe --name logs --plugin https://e
             help = "Open the --popup as an information popup that does not take key focus (e.g. --popup top-right --popup-no-focus)"
         )]
         popup_no_focus: bool,
+        #[clap(
+            long,
+            value_parser,
+            display_order(13),
+            requires("popup"),
+            conflicts_with("popup_no_focus"),
+            help = "Close the --popup when the user clicks outside it (e.g. --popup mouse --popup-close-on-outside-click)"
+        )]
+        popup_close_on_outside_click: bool,
     },
     ListClients,
     /// List all panes in the current session

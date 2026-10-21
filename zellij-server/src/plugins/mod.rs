@@ -168,6 +168,7 @@ pub enum PluginInstruction {
         caller_pane_id: Option<PaneId>,
         popup: Option<PipePopupPlacement>,
         popup_focused: bool,
+        popup_close_on_outside_click: bool,
     },
     SetCliPipeExitCode {
         pipe_id: String,
@@ -1124,6 +1125,7 @@ pub(crate) fn plugin_thread_main(
                 caller_pane_id,
                 popup,
                 popup_focused,
+                popup_close_on_outside_click,
             } => {
                 if wasm_bridge.cli_pipe_is_finished(&pipe_id) {
                     continue;
@@ -1169,6 +1171,7 @@ pub(crate) fn plugin_thread_main(
                                             caller_pane_id,
                                             placement,
                                             focused: popup_focused,
+                                            closes_on_outside_click: popup_close_on_outside_click,
                                         },
                                     ));
                                 },
@@ -1283,8 +1286,9 @@ pub(crate) fn plugin_thread_main(
                                     placement: request.placement,
                                     focused: request.focused,
                                     capture_all_keys: request.capture_all_keys,
-                                    closes_on_outside_click: request.element
-                                        == zellij_utils::prompt::PromptElement::Info,
+                                    closes_on_outside_click: request.close_on_outside_click
+                                        || request.element
+                                            == zellij_utils::prompt::PromptElement::Info,
                                 }),
                         );
                     },

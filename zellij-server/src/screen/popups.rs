@@ -641,6 +641,7 @@ impl Screen {
         caller_pane_id: Option<PaneId>,
         placement: PipePopupPlacement,
         focused: bool,
+        closes_on_outside_click: bool,
     ) {
         let Some((client_id, tab_id, pane_in_tab)) = self.pipe_popup_owner(caller_pane_id) else {
             let _ = self
@@ -662,7 +663,7 @@ impl Screen {
             placement,
             focused,
             false,
-            false,
+            closes_on_outside_click,
         );
     }
     pub fn open_prompt_popup(

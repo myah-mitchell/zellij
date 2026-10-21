@@ -52,6 +52,7 @@ pub fn start_cli_client(
                 pane_title,
                 popup,
                 popup_no_focus,
+                popup_close_on_outside_click,
             } => {
                 let exit_status = pipe_client(
                     &mut os_input,
@@ -70,6 +71,7 @@ pub fn start_cli_client(
                         pane_title,
                         popup,
                         popup_no_focus,
+                        popup_close_on_outside_click,
                     },
                     payload,
                 );
@@ -106,6 +108,7 @@ struct PipeRequest {
     pane_title: Option<String>,
     popup: Option<PipePopupPlacement>,
     popup_no_focus: bool,
+    popup_close_on_outside_click: bool,
 }
 
 impl PipeRequest {
@@ -139,6 +142,7 @@ impl PipeRequest {
                 pane_title: self.pane_title.clone(),
                 popup: self.popup,
                 popup_no_focus: self.popup_no_focus,
+                popup_close_on_outside_click: self.popup_close_on_outside_click,
             },
             terminal_id: self.pane_id,
             client_id: None,
@@ -437,6 +441,7 @@ pub fn start_prompt_client(
         pane_title: Some(format!("prompt: {}", plan.element.name())),
         popup: Some(prompt_cli.placement()),
         popup_no_focus: !prompt_cli.takes_focus(),
+        popup_close_on_outside_click: prompt_cli.answer_args().close_on_outside_click,
     }
     .prepare();
     let exit_status = match plan.input {
