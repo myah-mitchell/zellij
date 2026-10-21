@@ -1052,6 +1052,8 @@ pub enum ScreenInstruction {
         caller_pane_id: Option<PaneId>,
         placement: zellij_utils::data::PipePopupPlacement,
         focused: bool,
+        capture_all_keys: bool,
+        outside_click: zellij_utils::data::OutsideClick,
     },
     OpenPromptPopup {
         caller: crate::plugins::PromptCaller,
@@ -1061,7 +1063,7 @@ pub enum ScreenInstruction {
         placement: Option<zellij_utils::prompt::PromptPlacement>,
         focused: bool,
         capture_all_keys: bool,
-        closes_on_outside_click: bool,
+        outside_click: zellij_utils::data::OutsideClick,
     },
     CloseTopPopup(ClientId),
     ScrollPopup(ClientId, crate::route::PopupScroll),
@@ -15253,6 +15255,8 @@ pub(crate) fn screen_thread_main(
                 caller_pane_id,
                 placement,
                 focused,
+                capture_all_keys,
+                outside_click,
             } => {
                 screen.open_pipe_popup(
                     pipe_id,
@@ -15260,6 +15264,8 @@ pub(crate) fn screen_thread_main(
                     caller_pane_id,
                     placement,
                     focused,
+                    capture_all_keys,
+                    outside_click,
                 );
             },
             ScreenInstruction::OpenPromptPopup {
@@ -15270,7 +15276,7 @@ pub(crate) fn screen_thread_main(
                 placement,
                 focused,
                 capture_all_keys,
-                closes_on_outside_click,
+                outside_click,
             } => {
                 screen.open_prompt_popup(
                     caller,
@@ -15280,7 +15286,7 @@ pub(crate) fn screen_thread_main(
                     placement,
                     focused,
                     capture_all_keys,
-                    closes_on_outside_click,
+                    outside_click,
                 );
             },
             ScreenInstruction::CloseTopPopup(client_id) => {
