@@ -43,6 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * fix: allow renaming sessions from session mode (https://github.com/zellij-org/zellij/pull/5754)
 * feat: ctrl-mouse-drag to create a floating pane (https://github.com/zellij-org/zellij/pull/5766)
 * feat: allow programs to set their own resurrection command with zellij action set-resurrection-command (https://github.com/zellij-org/zellij/pull/5769)
+* feat: plugins can register a settings screen entry that opens their own settings
 
 
 ## [0.45.1] - 2026-08-28
