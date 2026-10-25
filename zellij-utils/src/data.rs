@@ -1288,6 +1288,9 @@ pub enum Event {
     GlobalAttentionUpdate(crate::attention::GlobalAttention),
     SessionHistoryUpdate(crate::session_history::SessionHistoryInfo),
     DesktopIntegration(String),
+    /// The settings entries plugins registered with `register_settings_entry`. Sent when the
+    /// list changes and once to each plugin when it loads.
+    PluginSettingsEntries(Vec<PluginSettingsEntry>),
     LiveViewStateChanged {
         target: Option<PaneAddress>,
         state: MirrorState,
@@ -1469,6 +1472,23 @@ pub struct SavedTabPreview {
     pub focused: bool,
     pub panes: Vec<SavedPanePreview>,
 }
+
+/// An entry a plugin registered for the settings screen with `register_settings_entry`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PluginSettingsEntry {
+    /// The plugin to send [`OPEN_PLUGIN_SETTINGS_MESSAGE`] to when the entry is selected.
+    pub plugin_id: u32,
+    pub title: String,
+}
+
+/// The name of the pipe message a plugin receives (through `ZellijPlugin::pipe`) when the user
+/// selects the entry it registered with `register_settings_entry`.
+pub const OPEN_PLUGIN_SETTINGS_MESSAGE: &str = "zellij:open_plugin_settings";
+
+/// The argument of [`OPEN_PLUGIN_SETTINGS_MESSAGE`] that holds the id of the client that selected
+/// the entry. A plugin that runs one instance per client receives the message in each of them, and
+/// can compare this with its own client id to open its settings only for that client.
+pub const OPEN_PLUGIN_SETTINGS_CLIENT_ID_ARG: &str = "client_id";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SavedSessionPreview {
@@ -5211,6 +5231,8 @@ pub enum PluginCommand {
     },
     SetLiveView(Option<LiveView>),
     SetLiveViewInput(bool),
+    RegisterSettingsEntry(String),
+    UnregisterSettingsEntry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

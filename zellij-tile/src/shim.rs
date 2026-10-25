@@ -1145,6 +1145,27 @@ pub fn request_desktop_integration(request: &zellij_utils::desktop_integration::
     run_plugin_command(PluginCommand::DesktopIntegration(request.to_json()));
 }
 
+/// List this plugin under "Plugin settings" in Zellij's settings screen.
+///
+/// Selecting the entry sends every instance of this plugin an [`OPEN_PLUGIN_SETTINGS_MESSAGE`]
+/// pipe message; the instance whose client id matches the [`OPEN_PLUGIN_SETTINGS_CLIENT_ID_ARG`]
+/// argument should open its settings. A plugin has one entry, replaced by calling this again and
+/// removed when the plugin unloads, reloads or crashes. Call this after the permission is granted.
+///
+/// # Permissions Required
+/// * `ChangeApplicationState`
+pub fn register_settings_entry(title: &str) {
+    run_plugin_command(PluginCommand::RegisterSettingsEntry(title.to_owned()));
+}
+
+/// Remove the entry this plugin added with [`register_settings_entry`].
+///
+/// # Permissions Required
+/// * `ChangeApplicationState`
+pub fn unregister_settings_entry() {
+    run_plugin_command(PluginCommand::UnregisterSettingsEntry);
+}
+
 pub fn hide_self() {
     let plugin_command = PluginCommand::HideSelf;
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();

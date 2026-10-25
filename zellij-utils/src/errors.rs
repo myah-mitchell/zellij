@@ -645,6 +645,8 @@ pub enum PluginContext {
     GlobalAttentionUpdate,
     SessionHistoryUpdate,
     RequestStateUpdateForPlugin,
+    RegisterSettingsEntry,
+    UnregisterSettingsEntry,
     UpdateSessionSaveTime,
     GetLastSessionSaveTime,
     DetectPluginConfigChanges,
