@@ -53,6 +53,6 @@ stack = []
 tag = "fork-ea-v{version}-{date}"
 version = "0.46.4"
 base = "upstream:main"
-stack = ["feat/plugin-close-on-outside-click", "feat/plugin-settings-section"]
+stack = ["feat/popup-close-on-outside-click", "feat/plugin-settings-section"]
 targets = ["linux-musl"]
 prerelease = true
