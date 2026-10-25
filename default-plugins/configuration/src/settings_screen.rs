@@ -6,7 +6,9 @@ use crate::blocks_screen::BlockPage;
 use crate::keybindings_screen::KeybindingsScreen;
 use crate::keys_screen::KeysScreen;
 use crate::mousebindings_screen::MousebindingsScreen;
-use crate::page::{changed_by, note_group, outside_overlays, run_effects, Page, PageResponse};
+use crate::page::{
+    changed_by, note_group, outside_overlays, run_effects, Effect, Page, PageResponse,
+};
 use crate::settings::{
     check_text, describe, inherits_from, is_row_kind, kdl_for, mode_choice_label, option_value,
     parse_hex_colour, release_key_placeholder, section, settings_in, sort_for_display, Category,
@@ -1051,6 +1053,9 @@ impl SettingsScreen {
                 }
             }
         }
+    }
+    pub fn update_plugin_settings_entries(&mut self, entries: Vec<PluginSettingsEntry>) {
+        self.blocks_screen.set_plugin_settings_entries(entries);
     }
     pub fn update_keybind_presets(
         &mut self,

@@ -7,6 +7,7 @@ mod keys_screen;
 mod list_editor;
 mod mousebindings_screen;
 mod page;
+mod plugin_settings;
 mod settings;
 mod settings_screen;
 mod setup_screen;
@@ -87,6 +88,7 @@ impl ZellijPlugin for State {
                 EventType::Visible,
                 EventType::PromptResult,
                 EventType::DesktopIntegration,
+                EventType::PluginSettingsEntries,
             ]);
             set_close_directly(false);
             self.screen = Screen::Settings(SettingsScreen::new());
@@ -147,6 +149,10 @@ impl ZellijPlugin for State {
                 },
                 Event::AvailableKeybindPresets(presets, errors) => {
                     settings_screen.update_keybind_presets(presets, errors);
+                    true
+                },
+                Event::PluginSettingsEntries(entries) => {
+                    settings_screen.update_plugin_settings_entries(entries);
                     true
                 },
                 Event::ConfigFileChangedSinceRead => {
