@@ -53,6 +53,6 @@ stack = []
 tag = "fork-ea-v{version}-{date}"
 version = "0.46.4"
 base = "upstream:main"
-stack = ["fix/plugin-menu-outside-click", "feat/plugin-settings-entries"]
+stack = ["fix/plugin-close-on-outside-click", "feat/plugin-settings-settings"]
 targets = ["linux-musl"]
 prerelease = true
