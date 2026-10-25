@@ -44,9 +44,9 @@ keep = 7
 # request to it, and bump version, to release a build with them.
 [build.fork]
 tag = "fork-v{version}"
-version = "0.46.4"
+version = "0.46.5"
 base = "upstream:main"
-stack = []
+stack = ["feat/popup-close-on-outside-click", "feat/plugin-settings-section"]
 
 # EA's of this fork's own release.
 [build.fork-ea]
