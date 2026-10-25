@@ -72,6 +72,7 @@ pub(crate) struct Popup {
     pub wanted_rows: usize,
     pub anchor_pane: Option<PaneId>,
     pub held_back: bool,
+    pub awaiting_permission: bool,
 }
 
 impl Popup {
@@ -82,7 +83,7 @@ impl Popup {
         }
     }
     fn takes_focus(&self) -> bool {
-        self.behavior.focused
+        self.behavior.focused || self.awaiting_permission
     }
 }
 
@@ -277,6 +278,7 @@ impl Tab {
             wanted_rows,
             anchor_pane: None,
             held_back: false,
+            awaiting_permission: false,
         });
         self.reflow_popups_for_client(client_id, Some(plugin_id));
         self.set_force_render();
@@ -387,7 +389,7 @@ impl Tab {
             return vec![];
         };
         let (info, rest): (Vec<Popup>, Vec<Popup>) =
-            stack.drain(..).partition(|popup| !popup.takes_focus());
+            stack.drain(..).partition(|popup| !popup.behavior.focused);
         *stack = rest;
         if stack.is_empty() {
             self.popups.remove(&client_id);
@@ -422,7 +424,7 @@ impl Tab {
         let _ = self.update_input_modes();
     }
     pub fn close_focused_popups(&mut self, client_id: ClientId) -> Vec<u32> {
-        self.remove_popups_where(client_id, |popup| popup.takes_focus())
+        self.remove_popups_where(client_id, |popup| popup.behavior.focused)
     }
     fn remove_popups_where(
         &mut self,
@@ -644,6 +646,7 @@ impl Tab {
                 if let Some(pane) = self.popup_pane_mut(plugin_id) {
                     pane.request_permissions_from_user(None);
                 }
+                self.set_popup_awaiting_permission(plugin_id, false);
                 let _ = self
                     .senders
                     .send_to_plugin(PluginInstruction::PermissionRequestResult(
@@ -658,6 +661,34 @@ impl Tab {
             _ => {},
         }
         true
+    }
+    pub fn set_popup_awaiting_permission(
+        &mut self,
+        plugin_id: u32,
+        awaiting_permission: bool,
+    ) -> Option<ClientId> {
+        let client_id = self.popup_client_for_plugin(plugin_id)?;
+        let stack = self.popups.get_mut(&client_id)?;
+        let position = stack
+            .iter()
+            .position(|popup| popup.plugin_id() == Some(plugin_id))?;
+        if stack[position].awaiting_permission == awaiting_permission {
+            return Some(client_id);
+        }
+        let mut popup = stack.remove(position);
+        popup.awaiting_permission = awaiting_permission;
+        popup.pane.set_should_render(true);
+        popup.pane.render_full_viewport();
+        if awaiting_permission {
+            stack.push(popup);
+        } else {
+            stack.insert(position, popup);
+        }
+        self.reflow_popups_for_client(client_id, None);
+        self.mark_popups_for_full_render();
+        self.set_force_render();
+        let _ = self.update_input_modes();
+        Some(client_id)
     }
     pub fn set_popup_focused(&mut self, plugin_id: u32, focused: bool) -> Option<ClientId> {
         let client_id = self.popup_client_for_plugin(plugin_id)?;
@@ -851,6 +882,9 @@ impl Tab {
         let is_press = event.event_type == MouseEventType::Press
             && (event.left || event.right || event.middle);
         if !inside && is_press {
+            if popup.awaiting_permission {
+                return Some(PopupMouseOutcome::Consumed);
+            }
             return match popup.behavior.outside_click {
                 OutsideClick::Close => Some(PopupMouseOutcome::CloseRequested),
                 OutsideClick::Block => Some(PopupMouseOutcome::Consumed),
