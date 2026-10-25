@@ -13126,7 +13126,7 @@ fn open_test_popup(tab: &mut Tab, client_id: ClientId, plugin_id: u32) {
         client_id,
         plugin_id,
         crate::tab::PopupPlacement::At(Position::new(3, 3)),
-        crate::tab::PopupKind::Menu,
+        crate::tab::PopupBehavior::menu(),
         20,
         6,
         None,
@@ -13140,7 +13140,7 @@ fn open_test_prompt_popup(tab: &mut Tab, client_id: ClientId, plugin_id: u32, li
         client_id,
         plugin_id,
         crate::tab::PopupPlacement::At(Position::new(line, 3)),
-        crate::tab::PopupKind::Prompt,
+        crate::tab::PopupBehavior::prompt(),
         20,
         4,
         None,
@@ -13246,7 +13246,7 @@ fn popup_is_placed_inside_the_screen_and_resized_on_request() {
         client_id,
         42,
         crate::tab::PopupPlacement::At(Position::new(18, 115)),
-        crate::tab::PopupKind::Menu,
+        crate::tab::PopupBehavior::menu(),
         20,
         6,
         None,
@@ -13294,7 +13294,7 @@ fn click_outside_popup_requests_close_and_click_inside_is_consumed() {
 }
 
 #[test]
-fn a_click_outside_an_explanation_popup_closes_it_but_not_outside_a_prompt() {
+fn a_click_outside_closes_a_popup_set_to_close_but_not_one_set_to_block() {
     let size = Size {
         cols: 121,
         rows: 20,
@@ -13304,15 +13304,16 @@ fn a_click_outside_an_explanation_popup_closes_it_but_not_outside_a_prompt() {
     let (plugin_sender, _plugin_receiver) = channels::unbounded();
     tab.senders
         .replace_to_plugin(SenderWithContext::new(plugin_sender));
-    for (plugin_id, kind, expected) in [
+    for (plugin_id, behavior, expected) in [
         (
             42,
-            crate::tab::PopupKind::Explanation,
+            crate::tab::PopupBehavior::prompt()
+                .on_outside_click(zellij_utils::data::OutsideClick::Close),
             crate::tab::PopupMouseOutcome::CloseRequested,
         ),
         (
             43,
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             crate::tab::PopupMouseOutcome::Consumed,
         ),
     ] {
@@ -13320,7 +13321,7 @@ fn a_click_outside_an_explanation_popup_closes_it_but_not_outside_a_prompt() {
             client_id,
             plugin_id,
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            kind,
+            behavior,
             20,
             6,
             None,
@@ -13430,7 +13431,7 @@ fn a_menu_popup_replaces_only_menus_and_never_a_prompt() {
             client_id,
             44,
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            crate::tab::PopupKind::Menu,
+            crate::tab::PopupBehavior::menu(),
             20,
             6,
             None,
@@ -13487,7 +13488,7 @@ fn prompt_popup_centered_in_a_pane_stays_centered_when_resized() {
         client_id,
         42,
         crate::tab::PopupPlacement::CenteredIn(area),
-        crate::tab::PopupKind::Prompt,
+        crate::tab::PopupBehavior::prompt(),
         20,
         6,
         None,
@@ -17594,7 +17595,7 @@ fn open_test_info_popup(
         client_id,
         plugin_id,
         crate::tab::PopupPlacement::Corner(corner),
-        crate::tab::PopupKind::Info,
+        crate::tab::PopupBehavior::info(),
         30,
         rows,
         None,
@@ -17781,7 +17782,7 @@ fn a_held_back_popup_asking_for_permissions_is_shown() {
         client_id,
         42,
         crate::tab::PopupPlacement::At(Position::new(3, 3)),
-        crate::tab::PopupKind::Prompt,
+        crate::tab::PopupBehavior::prompt(),
         60,
         8,
         None,
@@ -17913,7 +17914,7 @@ fn a_popup_plugin_shows_its_permission_request_and_takes_the_answer() {
         client_id,
         42,
         crate::tab::PopupPlacement::At(Position::new(3, 3)),
-        crate::tab::PopupKind::Prompt,
+        crate::tab::PopupBehavior::prompt(),
         60,
         8,
         None,
@@ -18797,7 +18798,7 @@ fn open_test_session_card(
     tab: &mut Tab,
     client_id: ClientId,
     plugin_id: u32,
-    kind: crate::tab::PopupKind,
+    kind: crate::tab::PopupBehavior,
 ) {
     let run = RunPluginOrAlias::from_url("session-manager", &None, None, None).unwrap();
     tab.open_popup(
@@ -18909,7 +18910,7 @@ fn the_session_card_popup_is_found_by_its_location_and_focus() {
         zellij_utils::data::PopupCorner::TopLeft,
         4,
     );
-    open_test_session_card(&mut tab, client_id, 70, crate::tab::PopupKind::Info);
+    open_test_session_card(&mut tab, client_id, 70, crate::tab::PopupBehavior::info());
     assert_eq!(
         tab.popup_for_location(client_id, "session-manager"),
         Some((70, false))
@@ -18917,7 +18918,7 @@ fn the_session_card_popup_is_found_by_its_location_and_focus() {
     let mut unfocused = tab.unfocused_popup_plugin_ids(client_id);
     unfocused.sort();
     assert_eq!(unfocused, vec![50, 70]);
-    tab.set_popup_kind(70, crate::tab::PopupKind::Prompt);
+    tab.set_popup_behavior(70, crate::tab::PopupBehavior::prompt());
     assert_eq!(
         tab.popup_for_location(client_id, "session-manager"),
         Some((70, true))
@@ -18937,7 +18938,7 @@ fn a_plugin_pane_can_be_dumped_with_its_colours_for_previews() {
     let (plugin_sender, _plugin_receiver) = channels::unbounded();
     tab.senders
         .replace_to_plugin(SenderWithContext::new(plugin_sender));
-    open_test_session_card(&mut tab, client_id, 80, crate::tab::PopupKind::Info);
+    open_test_session_card(&mut tab, client_id, 80, crate::tab::PopupBehavior::info());
     tab.handle_plugin_bytes(80, client_id, "\u{1b}[31mplugin text".as_bytes().to_vec())
         .unwrap();
     let popup = &tab.popups.get(&client_id).unwrap()[0];

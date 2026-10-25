@@ -16513,7 +16513,7 @@ fn a_popup_whose_plugin_fails_is_closed_and_unloaded() {
             tab_id,
             run_plugin_or_alias,
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             20,
             5,
             None,
@@ -16566,7 +16566,7 @@ fn closing_the_pane_a_popup_belongs_to_closes_the_popup() {
             tab_id,
             run_plugin_or_alias.clone(),
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             20,
             5,
             Some(PaneId::Terminal(2)),
@@ -16579,7 +16579,7 @@ fn closing_the_pane_a_popup_belongs_to_closes_the_popup() {
             tab_id,
             run_plugin_or_alias,
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             20,
             5,
             Some(PaneId::Terminal(1)),
@@ -16624,7 +16624,7 @@ fn closing_the_top_popup_from_a_key_leaves_information_popups_open() {
             tab_id,
             run_plugin_or_alias.clone(),
             crate::tab::PopupPlacement::Corner(zellij_utils::data::PopupCorner::TopRight),
-            crate::tab::PopupKind::Info,
+            crate::tab::PopupBehavior::info(),
             20,
             3,
             None,
@@ -16637,7 +16637,7 @@ fn closing_the_top_popup_from_a_key_leaves_information_popups_open() {
             tab_id,
             run_plugin_or_alias,
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             20,
             5,
             None,
@@ -16685,15 +16685,15 @@ fn switching_tabs_moves_information_popups_along_and_closes_focused_ones() {
     let first_tab_id = screen.get_active_tab(client_id).unwrap().id;
     let run_plugin_or_alias =
         RunPluginOrAlias::from_url("zellij:prompt", &None, None, None).unwrap();
-    for (plugin_id, kind, placement) in [
+    for (plugin_id, behavior, placement) in [
         (
             50,
-            crate::tab::PopupKind::Info,
+            crate::tab::PopupBehavior::info(),
             crate::tab::PopupPlacement::Corner(zellij_utils::data::PopupCorner::TopRight),
         ),
         (
             42,
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             crate::tab::PopupPlacement::At(Position::new(3, 3)),
         ),
     ] {
@@ -16704,7 +16704,7 @@ fn switching_tabs_moves_information_popups_along_and_closes_focused_ones() {
                 first_tab_id,
                 run_plugin_or_alias.clone(),
                 placement,
-                kind,
+                behavior,
                 20,
                 3,
                 None,
@@ -16764,7 +16764,7 @@ impl MockScreenWithPrompt {
             run_plugin_or_alias: RunPluginOrAlias::from_url("zellij:prompt", &None, None, None)
                 .unwrap(),
             placement: crate::tab::PopupPlacement::At(Position::new(3, 3)),
-            kind: crate::tab::PopupKind::Prompt,
+            behavior: crate::tab::PopupBehavior::prompt(),
             width: 20,
             height: 5,
             anchor_pane: None,
@@ -16943,7 +16943,7 @@ fn loaded_prompt_popup(
     plugin_receiver: &Receiver<(PluginInstruction, ErrorContext)>,
 ) -> (
     ClientId,
-    crate::tab::PopupKind,
+    crate::tab::PopupBehavior,
     Option<PaneId>,
     BTreeMap<String, String>,
 ) {
@@ -16952,11 +16952,11 @@ fn loaded_prompt_popup(
         .find_map(|(instruction, _)| match instruction {
             PluginInstruction::LoadPopup {
                 client_id,
-                kind,
+                behavior,
                 anchor_pane,
                 pipe: Some((crate::plugins::PopupRequest::Prompt(caller), caller_args)),
                 ..
-            } if caller == prompt_caller() => Some((client_id, kind, anchor_pane, caller_args)),
+            } if caller == prompt_caller() => Some((client_id, behavior, anchor_pane, caller_args)),
             _ => None,
         })
         .expect("a prompt popup was loaded")
@@ -16976,9 +16976,9 @@ fn a_plugin_prompt_without_a_visible_caller_pane_opens_over_the_focused_pane() {
         false,
         false,
     );
-    let (client_id, kind, anchor_pane, caller_args) = loaded_prompt_popup(&plugin_receiver);
+    let (client_id, behavior, anchor_pane, caller_args) = loaded_prompt_popup(&plugin_receiver);
     assert_eq!(client_id, 1);
-    assert_eq!(kind, crate::tab::PopupKind::Prompt);
+    assert_eq!(behavior, crate::tab::PopupBehavior::prompt());
     assert_eq!(anchor_pane, focused_pane);
     assert!(caller_args.contains_key(zellij_utils::prompt::CALLER_PANE_TITLE_ARG));
     assert!(!caller_args.contains_key(zellij_utils::prompt::CALLER_PANE_ID_ARG));
@@ -17023,8 +17023,8 @@ fn a_plugin_prompt_honours_an_explicit_pane_and_a_notice_takes_no_anchor() {
         false,
         false,
     );
-    let (_, kind, anchor_pane, _) = loaded_prompt_popup(&plugin_receiver);
-    assert_eq!(kind, crate::tab::PopupKind::Info);
+    let (_, behavior, anchor_pane, _) = loaded_prompt_popup(&plugin_receiver);
+    assert_eq!(behavior, crate::tab::PopupBehavior::info());
     assert_eq!(anchor_pane, None);
 }
 
@@ -18923,7 +18923,7 @@ fn screen_with_session_card(
             tab_id,
             run_plugin_or_alias,
             crate::tab::PopupPlacement::Corner(zellij_utils::data::PopupCorner::TopRight),
-            crate::tab::PopupKind::Info,
+            crate::tab::PopupBehavior::info(),
             40,
             6,
             None,
@@ -18945,15 +18945,15 @@ fn an_information_popup_can_take_focus_and_give_it_back() {
     assert!(tab.has_focused_popup_for_client(client_id));
     assert_eq!(tab.popup_plugin_id(client_id), Some(60));
     assert_eq!(
-        tab.popup_kind_of_plugin(60),
-        Some(crate::tab::PopupKind::Prompt)
+        tab.popup_behavior_of_plugin(60),
+        Some(crate::tab::PopupBehavior::prompt())
     );
     screen.set_popup_focused(60, false);
     let tab = screen.get_active_tab(client_id).unwrap();
     assert!(!tab.has_focused_popup_for_client(client_id));
     assert_eq!(
-        tab.popup_kind_of_plugin(60),
-        Some(crate::tab::PopupKind::Info)
+        tab.popup_behavior_of_plugin(60),
+        Some(crate::tab::PopupBehavior::info())
     );
     assert!(tab.has_popup_for_client(client_id));
 }
@@ -19037,8 +19037,8 @@ fn f9_focuses_an_unfocused_session_card() {
     screen.toggle_session_card(client_id);
     let tab = screen.get_active_tab(client_id).unwrap();
     assert_eq!(
-        tab.popup_kind_of_plugin(63),
-        Some(crate::tab::PopupKind::Prompt)
+        tab.popup_behavior_of_plugin(63),
+        Some(crate::tab::PopupBehavior::prompt())
     );
     assert_eq!(keybind_pipes_to(&plugin_receiver, 63), vec!["focus_card"]);
 }
@@ -19058,21 +19058,21 @@ fn f9_opens_a_focused_session_card_when_none_is_open() {
     let client_id = 1;
     let (mut screen, plugin_receiver) = screen_capturing_plugin_instructions();
     screen.toggle_session_card(client_id);
-    let loaded: Vec<(crate::tab::PopupKind, Option<String>)> = plugin_receiver
+    let loaded: Vec<(crate::tab::PopupBehavior, Option<String>)> = plugin_receiver
         .try_iter()
         .filter_map(|(instruction, _)| match instruction {
             PluginInstruction::LoadPopup {
                 run_plugin_or_alias,
-                kind,
+                behavior,
                 ..
-            } => Some((kind, role_of(&run_plugin_or_alias))),
+            } => Some((behavior, role_of(&run_plugin_or_alias))),
             _ => None,
         })
         .collect();
     assert_eq!(
         loaded,
         vec![(
-            crate::tab::PopupKind::Prompt,
+            crate::tab::PopupBehavior::prompt(),
             Some("card_focused".to_owned())
         )]
     );
@@ -19083,34 +19083,37 @@ fn the_startup_session_card_is_unfocused_and_says_so() {
     let client_id = 1;
     let (mut screen, plugin_receiver) = screen_capturing_plugin_instructions();
     screen.open_session_card(client_id);
-    let loaded: Vec<(crate::tab::PopupKind, Option<String>)> = plugin_receiver
+    let loaded: Vec<(crate::tab::PopupBehavior, Option<String>)> = plugin_receiver
         .try_iter()
         .filter_map(|(instruction, _)| match instruction {
             PluginInstruction::LoadPopup {
                 run_plugin_or_alias,
-                kind,
+                behavior,
                 ..
-            } => Some((kind, role_of(&run_plugin_or_alias))),
+            } => Some((behavior, role_of(&run_plugin_or_alias))),
             _ => None,
         })
         .collect();
     assert_eq!(
         loaded,
-        vec![(crate::tab::PopupKind::Info, Some("card_startup".to_owned()))]
+        vec![(
+            crate::tab::PopupBehavior::info(),
+            Some("card_startup".to_owned())
+        )]
     );
 }
 
 fn loaded_popups(
     plugin_receiver: &Receiver<(PluginInstruction, ErrorContext)>,
-) -> Vec<(crate::tab::PopupKind, Option<String>)> {
+) -> Vec<(crate::tab::PopupBehavior, Option<String>)> {
     plugin_receiver
         .try_iter()
         .filter_map(|(instruction, _)| match instruction {
             PluginInstruction::LoadPopup {
                 run_plugin_or_alias,
-                kind,
+                behavior,
                 ..
-            } => Some((kind, role_of(&run_plugin_or_alias))),
+            } => Some((behavior, role_of(&run_plugin_or_alias))),
             _ => None,
         })
         .collect()
@@ -19137,7 +19140,10 @@ fn a_session_card_requested_before_any_tab_exists_opens_once_a_tab_exists() {
     assert_eq!(screen.pending_session_card, None);
     assert_eq!(
         loaded_popups(&plugin_receiver),
-        vec![(crate::tab::PopupKind::Info, Some("card_startup".to_owned()))]
+        vec![(
+            crate::tab::PopupBehavior::info(),
+            Some("card_startup".to_owned())
+        )]
     );
     screen.open_pending_session_card();
     assert!(loaded_popups(&plugin_receiver).is_empty());
