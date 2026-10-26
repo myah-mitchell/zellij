@@ -20182,3 +20182,21 @@ pub fn pane_hidden_in_place_of_another_pane_is_not_moved() {
     assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(3)));
     assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
 }
+
+#[test]
+pub fn pane_hidden_behind_its_scrollback_editor_is_not_moved() {
+    let client_id = 1;
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    let first_tab = screen.tabs.get_mut(&0).unwrap();
+    assert_eq!(
+        first_tab.get_active_pane_id(client_id),
+        Some(PaneId::Terminal(3))
+    );
+    first_tab
+        .replace_active_pane_with_editor_pane(PaneId::Terminal(4), client_id)
+        .unwrap();
+    assert!(!screen.tabs[&0].has_non_suppressed_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(3), 1));
+    assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
+}
