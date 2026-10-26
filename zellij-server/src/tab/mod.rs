@@ -8148,14 +8148,20 @@ impl Tab {
         // scrollback editor), but it has to take itself out on its own (eg. a plugin using the
         // show_self() method)
         if let Some(pane) = self.extract_pane(pane_id, true) {
-            self.insert_suppressed_pane(pane_id, (false, pane));
+            self.insert_pane_hidden_on_its_own(pane);
         }
     }
     /// Takes out a pane hidden on its own (see `suppress_pane`) so it can be hidden in another
-    /// tab instead. Panes hidden in place of a scrollback editor, and hidden stack list members,
-    /// belong to this tab's layout and are left where they are.
+    /// tab instead. Panes hidden in place of a scrollback editor, hidden stack list members and
+    /// panes parked behind them belong to this tab's layout and are left where they are.
     pub fn extract_pane_hidden_on_its_own(&mut self, pane_id: PaneId) -> Option<Box<dyn Pane>> {
-        if self.pane_is_hidden_stack_list_member(&pane_id) {
+        // a pane parked behind a hidden stack list member is stored under its own id, but the
+        // stack list brings it back in place of that member, so it has to stay in this tab
+        let is_parked_behind_stack_list_member = self
+            .stack_list_parked_pairs
+            .values()
+            .any(|parked_pane_id| *parked_pane_id == pane_id);
+        if self.pane_is_hidden_stack_list_member(&pane_id) || is_parked_behind_stack_list_member {
             return None;
         }
         let is_hidden_on_its_own = self

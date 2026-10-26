@@ -19996,3 +19996,40 @@ fn leaving_a_tab_forgets_the_last_click_so_returning_cannot_double_click() {
     tab.add_multiple_clients(drained).unwrap();
     assert!(!tab.mouse_click_tracker.contains_key(&client_id));
 }
+
+#[test]
+fn only_panes_hidden_on_their_own_can_be_taken_out_of_a_tab() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 1;
+    let mut tab = create_new_tab(size, ModeInfo::default());
+    for pane_id in [PaneId::Terminal(2), PaneId::Terminal(3)] {
+        tab.new_pane(
+            pane_id,
+            None,
+            None,
+            false,
+            true,
+            NewPanePlacement::default(),
+            Some(client_id),
+            None,
+        )
+        .unwrap();
+        tab.suppress_pane(pane_id, Some(client_id));
+    }
+    // the stack list brings pane 3 back in place of its hidden member 9
+    tab.stack_list_parked_pairs
+        .insert(PaneId::Terminal(9), PaneId::Terminal(3));
+
+    assert!(tab
+        .extract_pane_hidden_on_its_own(PaneId::Terminal(3))
+        .is_none());
+    assert!(tab.has_pane_with_pid(&PaneId::Terminal(3)));
+    let extracted = tab
+        .extract_pane_hidden_on_its_own(PaneId::Terminal(2))
+        .map(|pane| pane.pid());
+    assert_eq!(extracted, Some(PaneId::Terminal(2)));
+    assert!(!tab.has_pane_with_pid(&PaneId::Terminal(2)));
+}
