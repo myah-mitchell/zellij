@@ -1139,9 +1139,10 @@ pub fn set_live_view_input(capture: bool) {
 
 /// Place this plugin's [FrameItem]s at the right of the top frame row of the pane with the
 /// specified [PaneId], replacing any this plugin placed there before and its default items for
-/// that pane. An empty list removes them, bringing back the default items.
+/// that pane. An empty list removes them, bringing back the default items. Items stay until the
+/// pane closes or this plugin unloads, and are ignored for a pane that doesn't exist.
 ///
-/// Each plugin's items are shown together, only when there's room for all of them. Clicks on a
+/// Items show only on frames that draw a title row. Each plugin's items are shown together, only when there's room for all of them. Clicks on a
 /// clickable item arrive as [Event::FrameItemClicked] once the plugin subscribes to
 /// [EventType::FrameItemClicked]. Requires the [PermissionType::ChangeApplicationState] permission.
 pub fn set_pane_frame_items(pane_id: PaneId, items: Vec<FrameItem>) {
