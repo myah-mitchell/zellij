@@ -20064,3 +20064,23 @@ mod session_rename {
         assert!(h.screen.session_rename_drafts.is_empty());
     }
 }
+
+#[test]
+fn frame_items_are_only_kept_for_panes_that_exist() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut screen = create_new_screen(size, true, true);
+    new_tab(&mut screen, 1, 0);
+    let items = vec![zellij_utils::data::FrameItem::new("close", "[X]").clickable()];
+    screen
+        .set_pane_frame_items(7, PaneId::Terminal(1), items.clone())
+        .unwrap();
+    screen
+        .set_pane_frame_items(7, PaneId::Terminal(99), items.clone())
+        .unwrap();
+    let groups_of = |pane_id| screen.frame_items.borrow().groups_for_pane(pane_id);
+    assert_eq!(groups_of(PaneId::Terminal(1)).len(), 1);
+    assert!(groups_of(PaneId::Terminal(99)).is_empty());
+}

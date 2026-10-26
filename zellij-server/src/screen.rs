@@ -9166,6 +9166,31 @@ impl Screen {
     pub fn has_pane_with_pid(&self, pane_id: &PaneId) -> bool {
         self.tabs.values().any(|tab| tab.has_pane_with_pid(pane_id))
     }
+    /// Items for a pane that doesn't exist are refused, since nothing would remove them until
+    /// the plugin unloads. Hidden panes count as existing and keep their items.
+    pub fn set_pane_frame_items(
+        &mut self,
+        plugin_id: u32,
+        pane_id: PaneId,
+        items: Vec<zellij_utils::data::FrameItem>,
+    ) -> Result<()> {
+        if !items.is_empty() && !self.has_pane_with_pid(&pane_id) {
+            log::warn!(
+                "Plugin {} set frame items on pane {:?}, which does not exist",
+                plugin_id,
+                pane_id
+            );
+            return Ok(());
+        }
+        let changed = self
+            .frame_items
+            .borrow_mut()
+            .set_for_pane(plugin_id, pane_id, items);
+        if changed {
+            self.render(None)?;
+        }
+        Ok(())
+    }
     fn close_pane_that_was_not_created(
         &mut self,
         pid: PaneId,
@@ -15749,13 +15774,7 @@ pub(crate) fn screen_thread_main(
                 pane_id,
                 items,
             } => {
-                let changed = screen
-                    .frame_items
-                    .borrow_mut()
-                    .set_for_pane(plugin_id, pane_id, items);
-                if changed {
-                    screen.render(None)?;
-                }
+                screen.set_pane_frame_items(plugin_id, pane_id, items)?;
             },
             ScreenInstruction::SetDefaultFrameItems { plugin_id, items } => {
                 let changed = screen

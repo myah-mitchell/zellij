@@ -66,7 +66,11 @@ impl FrameItems {
     /// One group per plugin with items for this pane: the items it placed on the pane, or
     /// otherwise its default items. Ordered by plugin id.
     pub fn groups_for_pane(&self, pane_id: PaneId) -> Vec<FrameItemGroup> {
+        // this runs for every pane on every render, so the common case of no items is kept cheap
         let pane_items = self.per_pane.get(&pane_id);
+        if self.defaults.is_empty() && pane_items.is_none() {
+            return vec![];
+        }
         let mut groups: BTreeMap<u32, &Vec<FrameItem>> = self
             .defaults
             .iter()

@@ -246,6 +246,8 @@ fn is_self_command(command: &PluginCommand) -> bool {
             | PluginCommand::SetSelfCollapsed(..)
             | PluginCommand::SetLiveView(..)
             | PluginCommand::SetLiveViewInput(..)
+            | PluginCommand::SetPaneFrameItems(..)
+            | PluginCommand::SetDefaultFrameItems(..)
     ) || self_command_has_response(command)
 }
 
