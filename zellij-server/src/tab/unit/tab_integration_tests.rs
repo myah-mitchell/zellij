@@ -19996,3 +19996,59 @@ fn leaving_a_tab_forgets_the_last_click_so_returning_cannot_double_click() {
     tab.add_multiple_clients(drained).unwrap();
     assert!(!tab.mouse_click_tracker.contains_key(&client_id));
 }
+
+#[test]
+fn clicking_a_frame_item_sends_the_click_to_the_plugin_that_placed_it() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 1;
+    let (mut tab, mock_plugin_receiver) =
+        create_new_tab_with_plugin_receiver(size, ModeInfo::default());
+    let frame_items: crate::ui::frame_items::SharedFrameItems = Default::default();
+    frame_items.borrow_mut().set_defaults(
+        7,
+        vec![zellij_utils::data::FrameItem::new("close", "[X]").clickable()],
+    );
+    tab.set_frame_items(frame_items);
+    let mut output = Output::default();
+    tab.render(&mut output, None).unwrap();
+
+    // the item sits just before the top right corner, in columns 117 to 119
+    for event in [
+        MouseEvent::new_left_press_event(Position::new(0, 50)),
+        MouseEvent::new_left_release_event(Position::new(0, 50)),
+    ] {
+        tab.handle_mouse_event(&event, client_id).unwrap();
+    }
+    tab.handle_mouse_event(
+        &MouseEvent::new_right_press_event(Position::new(0, 118)),
+        client_id,
+    )
+    .unwrap();
+
+    let mut clicks = vec![];
+    while let Ok((instruction, _ctx)) = mock_plugin_receiver.try_recv() {
+        if let PluginInstruction::Update(updates) = instruction {
+            for (plugin_id, update_client_id, event) in updates {
+                if let zellij_utils::data::Event::FrameItemClicked(click) = event {
+                    clicks.push((plugin_id, update_client_id, click));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        clicks,
+        vec![(
+            Some(7),
+            Some(client_id),
+            zellij_utils::data::FrameItemClick {
+                pane_id: zellij_utils::data::PaneId::Terminal(1),
+                item_id: "close".to_owned(),
+                button: zellij_utils::data::MouseButton::Right,
+                modifiers: Default::default(),
+            }
+        )]
+    );
+}
