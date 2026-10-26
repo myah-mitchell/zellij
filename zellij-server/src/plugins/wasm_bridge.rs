@@ -657,6 +657,9 @@ impl WasmBridge {
         let _ = self
             .senders
             .send_to_screen(ScreenInstruction::ClearLiveViewsOfPlugin(pid));
+        let _ = self
+            .senders
+            .send_to_screen(ScreenInstruction::ClearFrameItemsOfPlugin(pid));
         if self.shared_slot_owner.contains_key(&pid) {
             self.unload_shared_slot(pid);
             return Ok(());
@@ -766,6 +769,9 @@ impl WasmBridge {
         let _ = self
             .senders
             .send_to_screen(ScreenInstruction::ClearLiveViewsOfPlugin(plugin_id));
+        let _ = self
+            .senders
+            .send_to_screen(ScreenInstruction::ClearFrameItemsOfPlugin(plugin_id));
         let prompt_actions = self.prompt_requests.caller_reloaded(plugin_id);
         self.apply_prompt_actions(prompt_actions);
         // the reloaded plugin registers again if it still wants an entry
@@ -3031,6 +3037,9 @@ impl WasmBridge {
             let _ = self
                 .senders
                 .send_to_screen(ScreenInstruction::ClearLiveViewsOfPlugin(*slot_id));
+            let _ = self
+                .senders
+                .send_to_screen(ScreenInstruction::ClearFrameItemsOfPlugin(*slot_id));
         }
         if let Some(first_client_id) = self.get_first_client_id() {
             loading_context.client_id = first_client_id;

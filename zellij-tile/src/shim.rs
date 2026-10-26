@@ -1137,6 +1137,25 @@ pub fn set_live_view_input(capture: bool) {
     run_plugin_command(PluginCommand::SetLiveViewInput(capture));
 }
 
+/// Place this plugin's [FrameItem]s at the right of the top frame row of the pane with the
+/// specified [PaneId], replacing any this plugin placed there before and its default items for
+/// that pane. An empty list removes them, bringing back the default items.
+///
+/// Each plugin's items are shown together, only when there's room for all of them. Clicks on a
+/// clickable item arrive as [Event::FrameItemClicked] once the plugin subscribes to
+/// [EventType::FrameItemClicked]. Requires the [PermissionType::ChangeApplicationState] permission.
+pub fn set_pane_frame_items(pane_id: PaneId, items: Vec<FrameItem>) {
+    run_plugin_command(PluginCommand::SetPaneFrameItems(pane_id, items));
+}
+
+/// Place this plugin's [FrameItem]s on every pane frame, except on panes where
+/// [set_pane_frame_items] placed others. An empty list removes them.
+///
+/// Requires the [PermissionType::ChangeApplicationState] permission.
+pub fn set_default_frame_items(items: Vec<FrameItem>) {
+    run_plugin_command(PluginCommand::SetDefaultFrameItems(items));
+}
+
 pub fn get_saved_session_preview(name: &str) {
     run_plugin_command(PluginCommand::GetSavedSessionPreview(name.to_owned()));
 }

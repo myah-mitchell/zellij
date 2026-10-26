@@ -1177,6 +1177,16 @@ pub enum ScreenInstruction {
         capture: bool,
     },
     ClearLiveViewsOfPlugin(u32),
+    SetPaneFrameItems {
+        plugin_id: u32,
+        pane_id: PaneId,
+        items: Vec<zellij_utils::data::FrameItem>,
+    },
+    SetDefaultFrameItems {
+        plugin_id: u32,
+        items: Vec<zellij_utils::data::FrameItem>,
+    },
+    ClearFrameItemsOfPlugin(u32),
     ReleaseLiveViewInputWithKey(ClientId),
     ReportLiveViewCaptureChange,
     SetLiveViewReleaseKey(Option<String>),
@@ -1685,6 +1695,9 @@ impl From<&ScreenInstruction> for ScreenContext {
             | ScreenInstruction::ReportLiveViewCaptureChange
             | ScreenInstruction::SetLiveViewReleaseKey(..)
             | ScreenInstruction::LiveViewReleaseKeysChanged => ScreenContext::PaneMirror,
+            ScreenInstruction::SetPaneFrameItems { .. }
+            | ScreenInstruction::SetDefaultFrameItems { .. }
+            | ScreenInstruction::ClearFrameItemsOfPlugin(..) => ScreenContext::FrameItems,
             ScreenInstruction::UpdateBackgroundPluginSubscriptions(..) => {
                 ScreenContext::UpdateBackgroundPluginSubscriptions
             },
@@ -2201,6 +2214,7 @@ pub(crate) struct Screen {
     pane_mirrors: mirror::PaneMirrors,
     mirror_connector: Arc<dyn zellij_utils::pane_mirror::MirrorConnector>,
     live_views: crate::pane_mirror::SharedLiveViews,
+    frame_items: crate::ui::frame_items::SharedFrameItems,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2497,6 +2511,7 @@ impl Screen {
             pane_mirrors: Default::default(),
             mirror_connector: Arc::new(zellij_utils::pane_mirror::LocalSocketConnector),
             live_views: Default::default(),
+            frame_items: Default::default(),
             background_plugin_subscriptions: HashMap::new(),
             last_reported_plugin_tab_indices: HashMap::new(),
             pending_session_card: None,
@@ -6531,6 +6546,7 @@ impl Screen {
         tab.update_context_menu_enabled(self.context_menu_enabled);
         tab.update_grapheme_clusters(self.grapheme_clusters);
         tab.set_live_views(self.live_views.clone());
+        tab.set_frame_items(self.frame_items.clone());
         self.tabs.insert(tab_id, tab);
         Ok(())
     }
@@ -10592,6 +10608,7 @@ impl Screen {
     }
     fn notify_pane_closed_to_subscribers(&mut self, pane_id: zellij_utils::data::PaneId) {
         self.notify_mirrors_pane_closed(pane_id.into());
+        self.frame_items.borrow_mut().forget_pane(pane_id.into());
         if let zellij_utils::data::PaneId::Plugin(plugin_pane_id) = pane_id {
             self.forget_live_views_of_closed_pane(plugin_pane_id);
         }
@@ -15726,6 +15743,34 @@ pub(crate) fn screen_thread_main(
             },
             ScreenInstruction::ClearLiveViewsOfPlugin(plugin_pane_id) => {
                 screen.clear_live_views_of_plugin(plugin_pane_id);
+            },
+            ScreenInstruction::SetPaneFrameItems {
+                plugin_id,
+                pane_id,
+                items,
+            } => {
+                let changed = screen
+                    .frame_items
+                    .borrow_mut()
+                    .set_for_pane(plugin_id, pane_id, items);
+                if changed {
+                    screen.render(None)?;
+                }
+            },
+            ScreenInstruction::SetDefaultFrameItems { plugin_id, items } => {
+                let changed = screen
+                    .frame_items
+                    .borrow_mut()
+                    .set_defaults(plugin_id, items);
+                if changed {
+                    screen.render(None)?;
+                }
+            },
+            ScreenInstruction::ClearFrameItemsOfPlugin(plugin_id) => {
+                let changed = screen.frame_items.borrow_mut().forget_plugin(plugin_id);
+                if changed {
+                    screen.render(None)?;
+                }
             },
             ScreenInstruction::ReleaseLiveViewInputWithKey(client_id) => {
                 screen.release_live_view_input(client_id, zellij_utils::data::LiveViewRelease::Key);

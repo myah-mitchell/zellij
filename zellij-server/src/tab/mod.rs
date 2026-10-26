@@ -733,6 +733,15 @@ pub trait Pane {
     fn position_is_on_pin_button(&self, _position: &Position, _client_id: ClientId) -> bool {
         false
     }
+    /// The clickable plugin frame item at this absolute position on the frame as last rendered
+    /// for this client.
+    fn frame_item_at(
+        &self,
+        _position: &Position,
+        _client_id: ClientId,
+    ) -> Option<crate::ui::pane_boundaries_frame::FrameItemHit> {
+        None
+    }
     fn store_pane_name(&mut self);
     fn load_pane_name(&mut self);
     fn set_borderless(&mut self, borderless: bool);
@@ -8883,6 +8892,10 @@ impl Tab {
         self.tiled_panes.set_live_views(live_views.clone());
         self.floating_panes.set_live_views(live_views.clone());
         self.live_views = live_views;
+    }
+    pub fn set_frame_items(&mut self, frame_items: crate::ui::frame_items::SharedFrameItems) {
+        self.tiled_panes.set_frame_items(frame_items.clone());
+        self.floating_panes.set_frame_items(frame_items);
     }
     pub fn live_view_focus(&self, client_id: ClientId) -> Option<PaneId> {
         if let Some(plugin_id) = self.popup_plugin_id(client_id) {
