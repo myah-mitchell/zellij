@@ -14277,9 +14277,8 @@ pub(crate) fn screen_thread_main(
                 screen.log_and_report_session_state()?;
             },
             ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id) => {
-                if screen.move_hidden_pane_to_tab(pane_id, tab_id) {
-                    screen.log_and_report_session_state()?;
-                }
+                // the show that is always queued right after this reports the session state
+                screen.move_hidden_pane_to_tab(pane_id, tab_id);
             },
             ScreenInstruction::FocusPaneWithId(
                 pane_id,
