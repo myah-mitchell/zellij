@@ -351,12 +351,19 @@ impl PaneFrame {
         let available = max_length.saturating_sub(built_in_len);
         let mut characters = vec![];
         let mut len = 0;
-        let mut piece_count = usize::from(built_in.is_some());
+        // the "|" before the built-in indications is only drawn once some group is shown
+        let built_in_separator_len = usize::from(built_in.is_some());
         let mut regions = self.frame_item_regions.pending.borrow_mut();
         for group in &self.frame_item_groups {
-            let group_len: usize = group.items.iter().map(|item| item.text.width()).sum();
-            let separator_len = usize::from(piece_count > 0);
-            if group_len == 0 || len + group_len + separator_len > available {
+            let group_len: usize = group
+                .items
+                .iter()
+                .map(|item| graphemes::display_width(&item.text))
+                .sum();
+            let separator_len = usize::from(len > 0);
+            if group_len == 0
+                || len + separator_len + group_len + built_in_separator_len > available
+            {
                 // a group is shown whole or not at all
                 continue;
             }
@@ -365,7 +372,7 @@ impl PaneFrame {
                 len += 1;
             }
             for item in &group.items {
-                let item_len = item.text.width();
+                let item_len = graphemes::display_width(&item.text);
                 if item.is_clickable {
                     regions.push(FrameItemRegion {
                         start: len,
@@ -379,7 +386,6 @@ impl PaneFrame {
                 characters.append(&mut foreground_color(&item.text, self.color));
                 len += item_len;
             }
-            piece_count += 1;
         }
         match built_in {
             Some((mut built_in, built_in_len)) => {
@@ -2008,6 +2014,24 @@ mod tests {
         assert_eq!(item_at(&frame, 2, 37), None);
         assert_eq!(item_at(&frame, 2, 44), None);
         assert_eq!(item_at(&frame, 3, 39), None);
+    }
+
+    #[test]
+    fn several_groups_next_to_the_pin_checkbox_stay_within_the_room_given() {
+        let group = |plugin_id, text| FrameItemGroup {
+            plugin_id,
+            items: vec![zellij_utils::data::FrameItem::new("item", text)],
+        };
+        let mut frame = frame_with_items(40, vec![group(1, "aa"), group(2, "bb")]);
+        frame.is_floating = true;
+        // "aa|bb| PIN [ ] " needs 15 columns
+        for max_length in 9..20 {
+            let (characters, len) = frame.render_title_right_side(max_length).unwrap();
+            assert!(len <= max_length, "{} > {}", len, max_length);
+            assert_eq!(characters.len(), len);
+        }
+        let (_, len) = frame.render_title_right_side(14).unwrap();
+        assert_eq!(len, "aa| PIN [ ] ".len());
     }
 
     #[test]
