@@ -6634,6 +6634,19 @@ mod tests {
     }
 
     #[test]
+    fn show_pane_with_id_round_trips_with_and_without_a_tab() {
+        use crate::data::PaneId;
+        for original in [
+            PluginCommand::ShowPaneWithId(PaneId::Terminal(1), true, false, Some(2)),
+            PluginCommand::ShowPaneWithId(PaneId::Plugin(3), false, true, None),
+        ] {
+            let protobuf: ProtobufPluginCommand = original.clone().try_into().expect("encode");
+            let decoded: PluginCommand = protobuf.try_into().expect("decode");
+            assert_eq!(format!("{:?}", decoded), format!("{:?}", original));
+        }
+    }
+
+    #[test]
     fn an_empty_pane_border_style_round_trips() {
         use crate::data::{BorderStyleOverride, PaneId};
         let original =
