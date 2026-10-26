@@ -1219,11 +1219,13 @@ fn host_run_plugin_command(mut caller: Caller<'_, PluginEnv>) {
                         pane_id,
                         should_float_if_hidden,
                         should_focus_pane,
+                        tab_id,
                     ) => show_pane_with_id(
                         env,
                         pane_id.into(),
                         should_float_if_hidden,
                         should_focus_pane,
+                        tab_id,
                     ),
                     PluginCommand::OpenCommandPaneBackground(command_to_run, context) => {
                         open_command_pane_background(env, command_to_run, context)
@@ -3481,7 +3483,14 @@ fn show_pane_with_id(
     pane_id: PaneId,
     should_float_if_hidden: bool,
     should_focus_pane: bool,
+    tab_id: Option<usize>,
 ) {
+    // sent first so the show below finds the pane in the target tab
+    if let Some(tab_id) = tab_id {
+        let _ = env
+            .senders
+            .send_to_screen(ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id));
+    }
     if should_focus_pane {
         let _ = env
             .senders

@@ -5147,7 +5147,7 @@ pub enum PluginCommand {
     Reconfigure(String, bool), // String -> stringified configuration, bool -> save configuration
     // file to disk
     HidePaneWithId(PaneId),
-    ShowPaneWithId(PaneId, bool, bool), // bools -> should_float_if_hidden, should_focus_pane
+    ShowPaneWithId(PaneId, bool, bool, Option<usize>), // bools -> should_float_if_hidden, should_focus_pane, usize -> tab_id to show a hidden pane in
     OpenCommandPaneBackground(CommandToRun, Context),
     RerunCommandPane(u32), // u32  - terminal pane id
     ResizePaneIdWithDirection(ResizeStrategy, PaneId),

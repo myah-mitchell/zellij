@@ -8151,6 +8151,26 @@ impl Tab {
             self.insert_suppressed_pane(pane_id, (false, pane));
         }
     }
+    /// Takes out a pane hidden on its own (see `suppress_pane`) so it can be hidden in another
+    /// tab instead. Panes hidden in place of a scrollback editor, and hidden stack list members,
+    /// belong to this tab's layout and are left where they are.
+    pub fn extract_pane_hidden_on_its_own(&mut self, pane_id: PaneId) -> Option<Box<dyn Pane>> {
+        if self.pane_is_hidden_stack_list_member(&pane_id) {
+            return None;
+        }
+        let is_hidden_on_its_own = self
+            .suppressed_panes
+            .get(&pane_id)
+            .map(|(is_scrollback_editor, pane)| !is_scrollback_editor && pane.pid() == pane_id)
+            .unwrap_or(false);
+        if !is_hidden_on_its_own {
+            return None;
+        }
+        self.suppressed_panes.remove(&pane_id).map(|(_, pane)| pane)
+    }
+    pub fn insert_pane_hidden_on_its_own(&mut self, pane: Box<dyn Pane>) {
+        self.insert_suppressed_pane(pane.pid(), (false, pane));
+    }
     fn take_suppressed_pane_by_pid(&mut self, pane_id: PaneId) -> Option<Box<dyn Pane>> {
         let stored_under_own_id = self
             .suppressed_panes

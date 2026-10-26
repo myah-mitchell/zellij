@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * feat: allow programs to set their own resurrection command with zellij action set-resurrection-command (https://github.com/zellij-org/zellij/pull/5769)
 * feat: allow hiding tab-bar + status-bar at runtime (https://github.com/zellij-org/zellij/pull/5781)
 * feat: plugins can register a settings screen entry that opens their own settings (https://github.com/zellij-org/zellij/pull/5779)
+* (BREAKING CHANGE zellij-tile) `show_pane_with_id` takes a `tab_id: Option<usize>`; with a tab id, a hidden pane is moved to that tab and shown there
+    * Migration help: add `None` as the last argument to keep the current behavior
 
 
 ## [0.45.1] - 2026-08-28
