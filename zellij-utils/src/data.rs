@@ -4375,6 +4375,7 @@ impl fmt::Display for OutsideClick {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct PopupOptions {
     pub focused: bool,
     pub corner: Option<PopupCorner>,
