@@ -293,11 +293,7 @@ impl SessionIndicator {
                     column,
                     CARD_WIDTH,
                     CARD_HEIGHT,
-                    PopupOptions {
-                        focused: true,
-                        corner: Some(PopupCorner::TopRight),
-                        ..Default::default()
-                    },
+                    PopupOptions::default().corner(PopupCorner::TopRight),
                 );
             },
             None => {},
