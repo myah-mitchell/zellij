@@ -51,7 +51,7 @@ stack = ["feat/popup-close-on-outside-click", "feat/plugin-settings-section"]
 # EA's of this fork's own release.
 [build.fork-ea]
 tag = "fork-ea-v{version}-{date}"
-version = "0.46.4"
+version = "0.46.6"
 base = "upstream:main"
 stack = ["feat/popup-close-on-outside-click", "feat/plugin-settings-section"]
 targets = ["linux-musl"]
