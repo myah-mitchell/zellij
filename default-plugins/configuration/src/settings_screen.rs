@@ -1052,6 +1052,9 @@ impl SettingsScreen {
             }
         }
     }
+    pub fn update_plugin_settings_entries(&mut self, entries: Vec<PluginSettingsEntry>) {
+        self.blocks_screen.set_plugin_settings_entries(entries);
+    }
     pub fn update_keybind_presets(
         &mut self,
         presets: Vec<KeybindPresetInfo>,
