@@ -296,6 +296,7 @@ impl SessionIndicator {
                     PopupOptions {
                         focused: true,
                         corner: Some(PopupCorner::TopRight),
+                        ..Default::default()
                     },
                 );
             },

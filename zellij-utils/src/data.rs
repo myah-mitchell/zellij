@@ -4344,10 +4344,42 @@ impl fmt::Display for PopupCorner {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
+pub enum OutsideClick {
+    #[default]
+    Block,
+    Close,
+}
+
+impl FromStr for OutsideClick {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "block" => Ok(OutsideClick::Block),
+            "close" => Ok(OutsideClick::Close),
+            other => Err(format!(
+                "invalid outside click behavior '{}', expected one of: block, close",
+                other
+            )),
+        }
+    }
+}
+
+impl fmt::Display for OutsideClick {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OutsideClick::Block => write!(f, "block"),
+            OutsideClick::Close => write!(f, "close"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct PopupOptions {
     pub focused: bool,
     pub corner: Option<PopupCorner>,
+    pub capture_all_keys: bool,
+    pub outside_click: Option<OutsideClick>,
 }
 
 impl Default for PopupOptions {
@@ -4355,6 +4387,8 @@ impl Default for PopupOptions {
         PopupOptions {
             focused: true,
             corner: None,
+            capture_all_keys: false,
+            outside_click: None,
         }
     }
 }
@@ -6090,8 +6124,19 @@ mod popup_placement_tests {
             PopupOptions {
                 focused: true,
                 corner: None,
+                capture_all_keys: false,
+                outside_click: None,
             }
         );
+    }
+
+    #[test]
+    fn outside_click_parses_its_own_display_form() {
+        for outside_click in [OutsideClick::Block, OutsideClick::Close] {
+            assert_eq!(outside_click.to_string().parse(), Ok(outside_click));
+        }
+        assert_eq!(" Close ".parse::<OutsideClick>(), Ok(OutsideClick::Close));
+        assert!("unfocus".parse::<OutsideClick>().is_err());
     }
 }
 
