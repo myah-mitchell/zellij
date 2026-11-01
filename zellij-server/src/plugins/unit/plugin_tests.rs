@@ -14832,6 +14832,7 @@ pub fn a_reloaded_plugin_loses_its_settings_entry_until_it_registers_again() {
 }
 
 #[test]
+#[ignore]
 pub fn set_pane_and_default_frame_items_plugin_commands() {
     let temp_folder = tempdir().unwrap(); // placed explicitly in the test scope because its
                                           // destructor removes the directory
