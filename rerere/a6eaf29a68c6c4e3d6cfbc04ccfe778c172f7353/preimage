@@ -20000,11 +20000,15 @@ fn leaving_a_tab_forgets_the_last_click_so_returning_cannot_double_click() {
 #[test]
 <<<<<<<
 fn clicking_a_frame_item_sends_the_click_to_the_plugin_that_placed_it() {
+=======
+fn only_panes_hidden_on_their_own_can_be_taken_out_of_a_tab() {
+>>>>>>>
     let size = Size {
         cols: 121,
         rows: 20,
     };
     let client_id = 1;
+<<<<<<<
     let (mut tab, mock_plugin_receiver) =
         create_new_tab_with_plugin_receiver(size, ModeInfo::default());
     let frame_items: crate::ui::frame_items::SharedFrameItems = Default::default();
@@ -20119,12 +20123,6 @@ fn frame_items_are_drawn_and_clickable_only_where_a_title_row_is_drawn() {
     let screen = serialized.get(&client_id).unwrap().ansi();
     assert_eq!(screen.matches("[X]").count(), 1);
 =======
-fn only_panes_hidden_on_their_own_can_be_taken_out_of_a_tab() {
-    let size = Size {
-        cols: 121,
-        rows: 20,
-    };
-    let client_id = 1;
     let mut tab = create_new_tab(size, ModeInfo::default());
     for pane_id in [PaneId::Terminal(2), PaneId::Terminal(3)] {
         tab.new_pane(

@@ -20068,12 +20068,17 @@ mod session_rename {
 <<<<<<<
 #[test]
 fn frame_items_are_only_kept_for_panes_that_exist() {
+=======
+fn screen_with_a_hidden_pane_in_the_first_tab() -> Screen {
+    // tab 0 holds terminals 1 and 3 with terminal 1 hidden, tab 1 holds terminal 2
+>>>>>>>
     let size = Size {
         cols: 121,
         rows: 20,
     };
     let mut screen = create_new_screen(size, true, true);
     new_tab(&mut screen, 1, 0);
+<<<<<<<
     let items = vec![zellij_utils::data::FrameItem::new("close", "[X]").clickable()];
     screen
         .set_pane_frame_items(7, PaneId::Terminal(1), items.clone())
@@ -20085,14 +20090,6 @@ fn frame_items_are_only_kept_for_panes_that_exist() {
     assert_eq!(groups_of(PaneId::Terminal(1)).len(), 1);
     assert!(groups_of(PaneId::Terminal(99)).is_empty());
 =======
-fn screen_with_a_hidden_pane_in_the_first_tab() -> Screen {
-    // tab 0 holds terminals 1 and 3 with terminal 1 hidden, tab 1 holds terminal 2
-    let size = Size {
-        cols: 121,
-        rows: 20,
-    };
-    let mut screen = create_new_screen(size, true, true);
-    new_tab(&mut screen, 1, 0);
     new_tab(&mut screen, 2, 1);
     let first_tab = screen.tabs.get_mut(&0).unwrap();
     first_tab
