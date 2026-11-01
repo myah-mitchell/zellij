@@ -639,6 +639,9 @@ impl ZellijPlugin for State {
                 BareKey::Char('z') if key.has_only_modifiers(&[KeyModifier::Ctrl]) => {
                     go_to_tab_name(&format!("{:?}", self.configuration));
                 },
+                BareKey::Char('y') if key.has_only_modifiers(&[KeyModifier::Ctrl]) => {
+                    let _ = show_pane_with_id(PaneId::Terminal(1), true, false, Some(2));
+                },
                 BareKey::Char('1') if key.has_only_modifiers(&[KeyModifier::Ctrl]) => {
                     request_permission(&[PermissionType::ReadApplicationState]);
                 },
@@ -717,7 +720,7 @@ impl ZellijPlugin for State {
                     hide_pane_with_id(PaneId::Terminal(1));
                 },
                 BareKey::Char('b') if key.has_only_modifiers(&[KeyModifier::Alt]) => {
-                    show_pane_with_id(PaneId::Terminal(1), true, true);
+                    let _ = show_pane_with_id(PaneId::Terminal(1), true, true, None);
                 },
                 BareKey::Char('c') if key.has_only_modifiers(&[KeyModifier::Alt]) => {
                     open_command_pane_background(

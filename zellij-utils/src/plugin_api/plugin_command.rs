@@ -147,8 +147,9 @@ pub use super::generated_api::api::{
         SetSoftKeyboardPayload as ProtobufSetSoftKeyboardPayload, SetTimeoutPayload,
         ShowCursorPayload, ShowFloatingPanesPayload as ProtobufShowFloatingPanesPayload,
         ShowFloatingPanesResponse as ProtobufShowFloatingPanesResponse, ShowPaneWithIdPayload,
-        ShowSlotPayload, SlotCommandResponse as ProtobufSlotCommandResponse, StackPanesPayload,
-        SubscribePayload, SwitchSessionPayload, SwitchTabToIdPayload, SwitchTabToPayload,
+        ShowPaneWithIdResponse as ProtobufShowPaneWithIdResponse, ShowSlotPayload,
+        SlotCommandResponse as ProtobufSlotCommandResponse, StackPanesPayload, SubscribePayload,
+        SwitchSessionPayload, SwitchTabToIdPayload, SwitchTabToPayload,
         ThemeEntry as ProtobufThemeEntry, ThemeSource as ProtobufThemeSource,
         ToggleFloatingPanesPayload, TogglePaneBorderlessPayload,
         TogglePaneEmbedOrEjectForPaneIdPayload, TogglePaneIdFullscreenPayload, UnsubscribePayload,
@@ -1665,10 +1666,12 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                         .ok_or("Failed to parse ShowPaneWithId command")?;
                     let should_float_if_hidden = show_pane_with_id_payload.should_float_if_hidden;
                     let should_focus_pane = show_pane_with_id_payload.should_focus_pane;
+                    let tab_id = show_pane_with_id_payload.tab_id.map(|t| t as usize);
                     Ok(PluginCommand::ShowPaneWithId(
                         pane_id,
                         should_float_if_hidden,
                         should_focus_pane,
+                        tab_id,
                     ))
                 },
                 _ => Err("Mismatched payload for ShowPaneWithId"),
@@ -4059,12 +4062,14 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 pane_id_to_show,
                 should_float_if_hidden,
                 should_focus_pane,
+                tab_id,
             ) => Ok(ProtobufPluginCommand {
                 name: CommandName::ShowPaneWithId as i32,
                 payload: Some(Payload::ShowPaneWithIdPayload(ShowPaneWithIdPayload {
                     pane_id: ProtobufPaneId::try_from(pane_id_to_show).ok(),
                     should_float_if_hidden,
                     should_focus_pane,
+                    tab_id: tab_id.map(|t| t as u64),
                 })),
             }),
             PluginCommand::OpenCommandPaneBackground(command_to_run, context) => {
@@ -6673,6 +6678,19 @@ mod tests {
         for original in [
             PluginCommand::RegisterSettingsEntry("Status bar".to_owned()),
             PluginCommand::UnregisterSettingsEntry,
+        ] {
+            let protobuf: ProtobufPluginCommand = original.clone().try_into().expect("encode");
+            let decoded: PluginCommand = protobuf.try_into().expect("decode");
+            assert_eq!(format!("{:?}", decoded), format!("{:?}", original));
+        }
+    }
+
+    #[test]
+    fn show_pane_with_id_round_trips_with_and_without_a_tab() {
+        use crate::data::PaneId;
+        for original in [
+            PluginCommand::ShowPaneWithId(PaneId::Terminal(1), true, false, Some(2)),
+            PluginCommand::ShowPaneWithId(PaneId::Plugin(3), false, true, None),
         ] {
             let protobuf: ProtobufPluginCommand = original.clone().try_into().expect("encode");
             let decoded: PluginCommand = protobuf.try_into().expect("decode");

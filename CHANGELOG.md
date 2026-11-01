@@ -46,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * feat: allow hiding tab-bar + status-bar at runtime (https://github.com/zellij-org/zellij/pull/5781)
 * feat: plugins can register a settings screen entry that opens their own settings (https://github.com/zellij-org/zellij/pull/5779)
 * feat: plugins can add clickable items to pane frames
+* (BREAKING CHANGE zellij-tile) `show_pane_with_id` takes a `tab_id` to show a hidden pane in that tab, and returns a `Result`
+    * Migration help: add `None` as the last argument to keep the current behavior; with `None` the result is always `Ok(())`
 
 
 ## [0.45.1] - 2026-08-28

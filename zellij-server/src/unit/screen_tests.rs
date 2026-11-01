@@ -20084,3 +20084,166 @@ fn frame_items_are_only_kept_for_panes_that_exist() {
     assert_eq!(groups_of(PaneId::Terminal(1)).len(), 1);
     assert!(groups_of(PaneId::Terminal(99)).is_empty());
 }
+
+fn screen_with_a_hidden_pane_in_the_first_tab() -> Screen {
+    // tab 0 holds terminals 1 and 3 with terminal 1 hidden, tab 1 holds terminal 2
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut screen = create_new_screen(size, true, true);
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    let first_tab = screen.tabs.get_mut(&0).unwrap();
+    first_tab
+        .new_pane(
+            PaneId::Terminal(3),
+            None,
+            None,
+            false,
+            true,
+            NewPanePlacement::default(),
+            None,
+            None,
+        )
+        .unwrap();
+    first_tab.suppress_pane(PaneId::Terminal(1), None);
+    screen
+}
+
+#[test]
+pub fn hidden_pane_moved_to_another_tab_is_focused_floating_there() {
+    let client_id = 1;
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    screen.go_to_tab(1, client_id).unwrap();
+    assert_eq!(screen.get_active_tab(client_id).unwrap().id, 0);
+
+    assert!(screen.move_hidden_pane_to_tab(PaneId::Terminal(1), 1));
+    assert!(!screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(!screen.tabs[&1].has_non_suppressed_pane_with_pid(&PaneId::Terminal(1)));
+
+    screen
+        .focus_pane_with_id(PaneId::Terminal(1), true, false, client_id)
+        .unwrap();
+    let active_tab = screen.get_active_tab(client_id).unwrap();
+    assert_eq!(active_tab.id, 1);
+    assert_eq!(
+        active_tab.get_active_pane_id(client_id),
+        Some(PaneId::Terminal(1))
+    );
+    assert!(matches!(
+        active_tab.pane_location(&PaneId::Terminal(1)),
+        crate::tab::PaneLocation::Floating { .. }
+    ));
+}
+
+#[test]
+pub fn hidden_pane_moved_to_another_tab_can_be_shown_there_without_focus() {
+    let client_id = 1;
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    screen.go_to_tab(1, client_id).unwrap();
+
+    assert!(screen.move_hidden_pane_to_tab(PaneId::Terminal(1), 1));
+    screen
+        .tabs
+        .get_mut(&1)
+        .unwrap()
+        .unsuppress_or_expand_pane(PaneId::Terminal(1), false);
+    assert_eq!(screen.get_active_tab(client_id).unwrap().id, 0);
+    assert!(screen.tabs[&1].has_non_suppressed_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(matches!(
+        screen.tabs[&1].pane_location(&PaneId::Terminal(1)),
+        crate::tab::PaneLocation::Tiled
+    ));
+}
+
+#[test]
+pub fn hidden_pane_is_not_moved_to_a_tab_that_does_not_exist() {
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(1), 42));
+    assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(1)));
+}
+
+#[test]
+pub fn hidden_pane_is_not_moved_to_its_own_tab() {
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(1), 0));
+    assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(1)));
+    assert!(!screen.tabs[&0].has_non_suppressed_pane_with_pid(&PaneId::Terminal(1)));
+}
+
+#[test]
+pub fn visible_pane_is_not_moved_as_a_hidden_pane() {
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(3), 1));
+    assert!(screen.tabs[&0].has_non_suppressed_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
+}
+
+#[test]
+pub fn pane_hidden_in_place_of_another_pane_is_not_moved() {
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    screen
+        .tabs
+        .get_mut(&0)
+        .unwrap()
+        .suppress_pane_and_replace_with_pid(
+            PaneId::Terminal(3),
+            PaneId::Terminal(4),
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(!screen.tabs[&0].has_non_suppressed_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(3), 1));
+    assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
+}
+
+#[test]
+pub fn pane_hidden_behind_its_scrollback_editor_is_not_moved() {
+    let client_id = 1;
+    let mut screen = screen_with_a_hidden_pane_in_the_first_tab();
+    let first_tab = screen.tabs.get_mut(&0).unwrap();
+    assert_eq!(
+        first_tab.get_active_pane_id(client_id),
+        Some(PaneId::Terminal(3))
+    );
+    first_tab
+        .replace_active_pane_with_editor_pane(PaneId::Terminal(4), client_id)
+        .unwrap();
+    assert!(!screen.tabs[&0].has_non_suppressed_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.move_hidden_pane_to_tab(PaneId::Terminal(3), 1));
+    assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(3)));
+    assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
+}
+
+#[test]
+fn moving_a_hidden_pane_reports_whether_the_tab_exists() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(None, vec![]);
+    let mut move_to_tab = |tab_id| {
+        let (completion, completion_rx) = completion_and_receiver();
+        let _ = mock_screen
+            .to_screen
+            .send(ScreenInstruction::MoveHiddenPaneToTab(
+                PaneId::Terminal(1),
+                tab_id,
+                Some(completion),
+            ));
+        crate::route::wait_for_action_completion(completion_rx, "MoveHiddenPaneToTab", false)
+    };
+    let existing_tab = move_to_tab(0);
+    let missing_tab = move_to_tab(42);
+    mock_screen.teardown(vec![screen_thread]);
+    assert_eq!(existing_tab.exit_status, Some(0));
+    assert_eq!(missing_tab.exit_status, Some(1));
+    assert_eq!(missing_tab.error_message.as_deref(), Some("Tab not found"));
+}
