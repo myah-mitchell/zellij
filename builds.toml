@@ -51,8 +51,8 @@ stack = []
 # EA's of this fork's own release.
 [build.fork-ea]
 tag = "fork-ea-v{version}-{date}"
-version = "0.46.6"
+version = "0.46.7"
 base = "upstream:main"
-stack = ["feat/popup-close-on-outside-click", "feat/plugin-settings-section"]
+stack = ["feat/plugin-fram-items", "feat/show-pane-in-tab"]
 targets = ["linux-musl"]
 prerelease = true
