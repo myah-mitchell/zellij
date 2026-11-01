@@ -40,6 +40,7 @@ const RESIZE_INCREMENT_HEIGHT: usize = 2;
 pub struct FloatingPanes {
     panes: BTreeMap<PaneId, Box<dyn Pane>>,
     live_views: crate::pane_mirror::SharedLiveViews,
+    frame_items: crate::ui::frame_items::SharedFrameItems,
     display_area: Rc<RefCell<Size>>,
     viewport: Rc<RefCell<Viewport>>,
     connected_clients: Rc<RefCell<HashSet<ClientId>>>,
@@ -73,6 +74,9 @@ impl FloatingPanes {
     pub fn set_live_views(&mut self, live_views: crate::pane_mirror::SharedLiveViews) {
         self.live_views = live_views;
     }
+    pub fn set_frame_items(&mut self, frame_items: crate::ui::frame_items::SharedFrameItems) {
+        self.frame_items = frame_items;
+    }
     pub fn new(
         display_area: Rc<RefCell<Size>>,
         viewport: Rc<RefCell<Viewport>>,
@@ -92,6 +96,7 @@ impl FloatingPanes {
         FloatingPanes {
             panes: BTreeMap::new(),
             live_views: Default::default(),
+            frame_items: Default::default(),
             display_area,
             viewport,
             connected_clients,
@@ -722,6 +727,7 @@ impl FloatingPanes {
             if client_id_override.is_none() {
                 pane_contents_and_ui.set_live_views(self.live_views.clone());
             }
+            pane_contents_and_ui.set_frame_items(self.frame_items.clone());
             for client_id in &connected_clients {
                 let client_mode = self
                     .mode_info

@@ -58,7 +58,7 @@ pub use super::generated_api::api::{
         *,
     },
     input_mode::InputMode as ProtobufInputMode,
-    key::Key as ProtobufKey,
+    key::{key::KeyModifier as ProtobufKeyModifier, Key as ProtobufKey},
     style::{
         Style as ProtobufStyle, StyledText as ProtobufStyledText,
         StyledTextIndices as ProtobufStyledTextIndices,
@@ -82,6 +82,7 @@ use crate::data::{HostId, LiveViewRelease, MirrorClosedReason, MirrorState, Pane
 use crate::errors::prelude::*;
 use crate::input::actions::Action;
 
+use crate::data::MouseButton;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -747,6 +748,12 @@ impl TryFrom<ProtobufEvent> for Event {
                     })
                 },
                 _ => Err("Malformed payload for the LiveViewStateChanged Event"),
+            },
+            Some(ProtobufEventType::FrameItemClicked) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::FrameItemClickedPayload(payload)) => Ok(
+                    Event::FrameItemClicked(frame_item_click_from_protobuf(payload)?),
+                ),
+                _ => Err("Malformed payload for the FrameItemClicked Event"),
             },
             Some(ProtobufEventType::PaneAttentionChanged) => match protobuf_event.payload {
                 Some(ProtobufEventPayload::PaneAttentionChangedPayload(payload)) => {
@@ -1594,6 +1601,12 @@ impl TryFrom<Event> for ProtobufEvent {
                         }),
                         release_key,
                     },
+                )),
+            }),
+            Event::FrameItemClicked(click) => Ok(ProtobufEvent {
+                name: ProtobufEventType::FrameItemClicked as i32,
+                payload: Some(event::Payload::FrameItemClickedPayload(
+                    frame_item_click_to_protobuf(click)?,
                 )),
             }),
             Event::PaneAttentionChanged(pane_id, attention) => {
@@ -2945,6 +2958,7 @@ impl TryFrom<ProtobufEventType> for EventType {
             ProtobufEventType::DesktopIntegration => EventType::DesktopIntegration,
             ProtobufEventType::PluginSettingsEntries => EventType::PluginSettingsEntries,
             ProtobufEventType::LiveViewStateChanged => EventType::LiveViewStateChanged,
+            ProtobufEventType::FrameItemClicked => EventType::FrameItemClicked,
             ProtobufEventType::CommandChanged => EventType::CommandChanged,
             ProtobufEventType::AvailableLayoutInfo => EventType::AvailableLayoutInfo,
             ProtobufEventType::PluginConfigurationChanged => EventType::PluginConfigurationChanged,
@@ -3025,6 +3039,7 @@ impl TryFrom<EventType> for ProtobufEventType {
             EventType::DesktopIntegration => ProtobufEventType::DesktopIntegration,
             EventType::PluginSettingsEntries => ProtobufEventType::PluginSettingsEntries,
             EventType::LiveViewStateChanged => ProtobufEventType::LiveViewStateChanged,
+            EventType::FrameItemClicked => ProtobufEventType::FrameItemClicked,
             EventType::CommandChanged => ProtobufEventType::CommandChanged,
             EventType::AvailableLayoutInfo => ProtobufEventType::AvailableLayoutInfo,
             EventType::PluginConfigurationChanged => ProtobufEventType::PluginConfigurationChanged,
@@ -5442,6 +5457,125 @@ fn live_view_release_from_protobuf(value: i32) -> Result<LiveViewRelease, &'stat
         Ok(ProtobufLiveViewRelease::Cleared) => Ok(LiveViewRelease::Cleared),
         Ok(ProtobufLiveViewRelease::NotAllowed) => Ok(LiveViewRelease::NotAllowed),
         Err(_) => Err("Unknown live view release reason"),
+    }
+}
+
+impl From<FrameItem> for crate::data::FrameItem {
+    fn from(item: FrameItem) -> Self {
+        crate::data::FrameItem {
+            id: item.id,
+            text: item.text,
+            is_clickable: item.is_clickable,
+        }
+    }
+}
+
+impl From<crate::data::FrameItem> for FrameItem {
+    fn from(item: crate::data::FrameItem) -> Self {
+        FrameItem {
+            id: item.id,
+            text: item.text,
+            is_clickable: item.is_clickable,
+        }
+    }
+}
+
+fn frame_item_click_from_protobuf(
+    payload: FrameItemClickedPayload,
+) -> Result<crate::data::FrameItemClick, &'static str> {
+    let pane_id = payload
+        .pane_id
+        .ok_or("FrameItemClicked without a pane id")
+        .and_then(PaneId::try_from)?;
+    let button = match FrameItemMouseButton::try_from(payload.button) {
+        Ok(FrameItemMouseButton::Left) => MouseButton::Left,
+        Ok(FrameItemMouseButton::Right) => MouseButton::Right,
+        Ok(FrameItemMouseButton::Middle) => MouseButton::Middle,
+        Err(_) => return Err("Unknown frame item mouse button"),
+    };
+    let modifiers = payload
+        .modifiers
+        .into_iter()
+        .map(|modifier| {
+            ProtobufKeyModifier::try_from(modifier)
+                .map_err(|_| "Unknown key modifier")
+                .and_then(KeyModifier::try_from)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(crate::data::FrameItemClick {
+        pane_id,
+        item_id: payload.item_id,
+        button,
+        modifiers,
+    })
+}
+
+fn frame_item_click_to_protobuf(
+    click: crate::data::FrameItemClick,
+) -> Result<FrameItemClickedPayload, &'static str> {
+    let button = match click.button {
+        MouseButton::Left => FrameItemMouseButton::Left,
+        MouseButton::Right => FrameItemMouseButton::Right,
+        MouseButton::Middle => FrameItemMouseButton::Middle,
+        _ => return Err("Frame items are only clicked with the left, right or middle button"),
+    };
+    let modifiers = click
+        .modifiers
+        .into_iter()
+        .map(|modifier| ProtobufKeyModifier::try_from(modifier).map(|m| m as i32))
+        .collect::<Result<_, _>>()?;
+    Ok(FrameItemClickedPayload {
+        pane_id: Some(click.pane_id.try_into()?),
+        item_id: click.item_id,
+        button: button as i32,
+        modifiers,
+    })
+}
+
+#[cfg(test)]
+mod frame_item_event_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn frame_item_clicks_survive_the_plugin_boundary() {
+        for (button, modifiers) in [
+            (MouseButton::Left, BTreeSet::new()),
+            (MouseButton::Right, BTreeSet::from([KeyModifier::Ctrl])),
+            (
+                MouseButton::Middle,
+                BTreeSet::from([KeyModifier::Alt, KeyModifier::Shift]),
+            ),
+        ] {
+            let event = Event::FrameItemClicked(crate::data::FrameItemClick {
+                pane_id: PaneId::Plugin(4),
+                item_id: "close".to_owned(),
+                button,
+                modifiers,
+            });
+            let protobuf: ProtobufEvent = event.clone().try_into().unwrap();
+            let decoded: Event = protobuf.try_into().unwrap();
+            assert_eq!(decoded, event);
+        }
+    }
+
+    #[test]
+    fn frame_item_clicks_with_a_wheel_button_are_refused() {
+        let event = Event::FrameItemClicked(crate::data::FrameItemClick {
+            pane_id: PaneId::Terminal(1),
+            item_id: "close".to_owned(),
+            button: MouseButton::ScrollUp,
+            modifiers: BTreeSet::new(),
+        });
+        let protobuf: Result<ProtobufEvent, _> = event.try_into();
+        assert!(protobuf.is_err());
+    }
+
+    #[test]
+    fn the_event_type_of_frame_item_clicks_survives_the_plugin_boundary() {
+        let protobuf: ProtobufEventType = EventType::FrameItemClicked.try_into().unwrap();
+        let decoded: EventType = protobuf.try_into().unwrap();
+        assert_eq!(decoded, EventType::FrameItemClicked);
     }
 }
 

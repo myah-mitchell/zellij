@@ -1,7 +1,7 @@
 pub use super::generated_api::api::{
     action::{Action as ProtobufAction, PaneIdAndShouldFloat, SwitchToModePayload},
     event::{
-        EventNameList as ProtobufEventNameList, Header,
+        EventNameList as ProtobufEventNameList, FrameItem as ProtobufFrameItem, Header,
         ResurrectableSession as ProtobufResurrectableSession,
         SessionManifest as ProtobufSessionManifest,
     },
@@ -138,8 +138,9 @@ pub use super::generated_api::api::{
         ScrollToBottomInPaneIdPayload, ScrollToTopInPaneIdPayload, ScrollUpInPaneIdPayload,
         SendKeyToSessionPanePayload, SessionListSnapshot as ProtobufSessionListSnapshot,
         SessionPanePayload, SetCliPipeExitCodePayload, SetCollapsedSlotPayload,
-        SetFloatingPanePinnedPayload, SetLiveViewInputPayload, SetLiveViewPayload,
-        SetPaneBorderStylePayload, SetPaneBorderlessPayload, SetPaneColorPayload,
+        SetDefaultFrameItemsPayload, SetFloatingPanePinnedPayload, SetLiveViewInputPayload,
+        SetLiveViewPayload, SetPaneBorderStylePayload, SetPaneBorderlessPayload,
+        SetPaneColorPayload, SetPaneFrameItemsPayload,
         SetPaneFrameStylePayload as ProtobufSetPaneFrameStylePayload,
         SetPaneRegexHighlightsPayload, SetPopupSizePayload, SetSelectableSlotPayload,
         SetSelfCollapsedPayload, SetSelfMouseSelectionSupportPayload,
@@ -2923,6 +2924,27 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 None => Ok(PluginCommand::ShowBars),
                 _ => Err("ShowBars should not have a payload"),
             },
+            Some(CommandName::SetPaneFrameItems) => match protobuf_plugin_command.payload {
+                Some(Payload::SetPaneFrameItemsPayload(payload)) => {
+                    let pane_id = payload
+                        .pane_id
+                        .and_then(|pane_id| PaneId::try_from(pane_id).ok())
+                        .ok_or("Failed to parse SetPaneFrameItems command")?;
+                    Ok(PluginCommand::SetPaneFrameItems(
+                        pane_id,
+                        payload.items.into_iter().map(Into::into).collect(),
+                    ))
+                },
+                _ => Err("Mismatched payload for SetPaneFrameItems"),
+            },
+            Some(CommandName::SetDefaultFrameItems) => match protobuf_plugin_command.payload {
+                Some(Payload::SetDefaultFrameItemsPayload(payload)) => {
+                    Ok(PluginCommand::SetDefaultFrameItems(
+                        payload.items.into_iter().map(Into::into).collect(),
+                    ))
+                },
+                _ => Err("Mismatched payload for SetDefaultFrameItems"),
+            },
             Some(CommandName::FocusSessionPane) => match protobuf_plugin_command.payload {
                 Some(Payload::FocusSessionPanePayload(payload)) => {
                     let (session_name, pane_id) = session_pane_from_payload(payload)?;
@@ -5169,6 +5191,23 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 name: CommandName::ShowBars as i32,
                 payload: None,
             }),
+            PluginCommand::SetPaneFrameItems(pane_id, items) => Ok(ProtobufPluginCommand {
+                name: CommandName::SetPaneFrameItems as i32,
+                payload: Some(Payload::SetPaneFrameItemsPayload(
+                    SetPaneFrameItemsPayload {
+                        pane_id: Some(pane_id.try_into()?),
+                        items: items.into_iter().map(ProtobufFrameItem::from).collect(),
+                    },
+                )),
+            }),
+            PluginCommand::SetDefaultFrameItems(items) => Ok(ProtobufPluginCommand {
+                name: CommandName::SetDefaultFrameItems as i32,
+                payload: Some(Payload::SetDefaultFrameItemsPayload(
+                    SetDefaultFrameItemsPayload {
+                        items: items.into_iter().map(ProtobufFrameItem::from).collect(),
+                    },
+                )),
+            }),
             PluginCommand::FocusSessionPane {
                 session_name,
                 pane_id,
@@ -6609,6 +6648,18 @@ mod tests {
             })),
             PluginCommand::SetLiveViewInput(true),
             PluginCommand::SetLiveViewInput(false),
+            PluginCommand::SetPaneFrameItems(
+                PaneId::Terminal(3),
+                vec![
+                    crate::data::FrameItem::new("minimize", "[-]").clickable(),
+                    crate::data::FrameItem::new("status", " ok "),
+                ],
+            ),
+            PluginCommand::SetPaneFrameItems(PaneId::Plugin(2), vec![]),
+            PluginCommand::SetDefaultFrameItems(vec![
+                crate::data::FrameItem::new("close", "[X]").clickable()
+            ]),
+            PluginCommand::SetDefaultFrameItems(vec![]),
         ];
         for original in commands {
             let protobuf: ProtobufPluginCommand = original.clone().try_into().expect("encode");

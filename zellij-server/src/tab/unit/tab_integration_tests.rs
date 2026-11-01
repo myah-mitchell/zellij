@@ -19996,3 +19996,125 @@ fn leaving_a_tab_forgets_the_last_click_so_returning_cannot_double_click() {
     tab.add_multiple_clients(drained).unwrap();
     assert!(!tab.mouse_click_tracker.contains_key(&client_id));
 }
+
+#[test]
+fn clicking_a_frame_item_sends_the_click_to_the_plugin_that_placed_it() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 1;
+    let (mut tab, mock_plugin_receiver) =
+        create_new_tab_with_plugin_receiver(size, ModeInfo::default());
+    let frame_items: crate::ui::frame_items::SharedFrameItems = Default::default();
+    frame_items.borrow_mut().set_defaults(
+        7,
+        vec![zellij_utils::data::FrameItem::new("close", "[X]").clickable()],
+    );
+    tab.set_frame_items(frame_items);
+    let mut output = Output::default();
+    tab.render(&mut output, None).unwrap();
+
+    // the item sits just before the top right corner, in columns 117 to 119
+    for event in [
+        MouseEvent::new_left_press_event(Position::new(0, 50)),
+        MouseEvent::new_left_release_event(Position::new(0, 50)),
+    ] {
+        tab.handle_mouse_event(&event, client_id).unwrap();
+    }
+    tab.handle_mouse_event(
+        &MouseEvent::new_right_press_event(Position::new(0, 118)),
+        client_id,
+    )
+    .unwrap();
+
+    let mut clicks = vec![];
+    while let Ok((instruction, _ctx)) = mock_plugin_receiver.try_recv() {
+        if let PluginInstruction::Update(updates) = instruction {
+            for (plugin_id, update_client_id, event) in updates {
+                if let zellij_utils::data::Event::FrameItemClicked(click) = event {
+                    clicks.push((plugin_id, update_client_id, click));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        clicks,
+        vec![(
+            Some(7),
+            Some(client_id),
+            zellij_utils::data::FrameItemClick {
+                pane_id: zellij_utils::data::PaneId::Terminal(1),
+                item_id: "close".to_owned(),
+                button: zellij_utils::data::MouseButton::Right,
+                modifiers: Default::default(),
+            }
+        )]
+    );
+}
+
+#[test]
+fn frame_items_are_drawn_and_clickable_only_where_a_title_row_is_drawn() {
+    let size = Size {
+        cols: 121,
+        rows: 40,
+    };
+    let client_id = 1;
+    let mut tab = create_new_tab_with_stacked_pane_list(size, ModeInfo::default(), true, None);
+    tab.new_pane(
+        PaneId::Terminal(2),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::default(),
+        Some(client_id),
+        None,
+    )
+    .unwrap();
+    tab.new_pane(
+        PaneId::Terminal(3),
+        None,
+        None,
+        false,
+        true,
+        NewPanePlacement::Stacked {
+            pane_id_to_stack_under: None,
+            borderless: None,
+            border_style: None,
+        },
+        Some(client_id),
+        None,
+    )
+    .unwrap();
+    assert!(tab.has_stack_lists());
+    let frame_items: crate::ui::frame_items::SharedFrameItems = Default::default();
+    frame_items.borrow_mut().set_defaults(
+        7,
+        vec![zellij_utils::data::FrameItem::new("close", "[X]").clickable()],
+    );
+    tab.set_frame_items(frame_items);
+    let mut output = Output::default();
+    tab.render(&mut output, None).unwrap();
+
+    let hits_on = |pane_id| {
+        let pane = tab.get_pane_with_id(pane_id).unwrap();
+        (0..size.rows)
+            .flat_map(|line| {
+                (0..size.cols).map(move |column| Position::new(line as i32, column as u16))
+            })
+            .filter_map(|position| pane.frame_item_at(&position, client_id))
+            .collect::<Vec<_>>()
+    };
+    // the plain pane has a title row with the item; the stack list draws centered entry
+    // labels and the visible member's frame without a title row, so it shows no items
+    let hits_on_plain_pane = hits_on(PaneId::Terminal(1));
+    assert_eq!(hits_on_plain_pane.len(), 3, "one hit per column of [X]");
+    assert!(hits_on_plain_pane
+        .iter()
+        .all(|hit| hit.plugin_id == 7 && hit.item_id == "close"));
+    assert!(hits_on(PaneId::Terminal(3)).is_empty());
+    let serialized = output.serialize().unwrap();
+    let screen = serialized.get(&client_id).unwrap().ansi();
+    assert_eq!(screen.matches("[X]").count(), 1);
+}

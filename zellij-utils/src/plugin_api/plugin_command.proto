@@ -273,6 +273,8 @@ enum CommandName {
   ShowBars = 283;
   RegisterSettingsEntry = 284;
   UnregisterSettingsEntry = 285;
+  SetPaneFrameItems = 286;
+  SetDefaultFrameItems = 287;
 }
 
 message PluginCommand {
@@ -484,6 +486,8 @@ message PluginCommand {
     BarNamesPayload toggle_bars_payload = 224;
     BarNamesPayload hide_bars_payload = 225;
     string register_settings_entry_payload = 226;
+    SetPaneFrameItemsPayload set_pane_frame_items_payload = 227;
+    SetDefaultFrameItemsPayload set_default_frame_items_payload = 228;
   }
 }
 
@@ -1814,4 +1818,13 @@ message SetLiveViewInputPayload {
 
 message BarNamesPayload {
   repeated string bar_names = 1;
+}
+
+message SetPaneFrameItemsPayload {
+  PaneId pane_id = 1;
+  repeated event.FrameItem items = 2;
+}
+
+message SetDefaultFrameItemsPayload {
+  repeated event.FrameItem items = 1;
 }

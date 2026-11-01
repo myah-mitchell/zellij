@@ -28,14 +28,14 @@ use zellij_utils::data::{
     BreakPanesToTabWithIndexResponse, CommandType, ConfigSnapshot, ConnectToSession,
     ContextMenuTarget, DeleteAllDeadSessionsResponse, DeleteDeadSessionResponse,
     DeleteLayoutResponse, EditLayoutResponse, Event, FloatingPaneCoordinates,
-    FocusOrCreateTabResponse, GetFocusedPaneInfoResponse, GetPaneCwdResponse, GetPanePidResponse,
-    GetPaneRunningCommandResponse, HttpVerb, KeyWithModifier, KillSessionsResponse, LayoutInfo,
-    LayoutMetadata, LayoutParsingError, MessageToPlugin, MouseTrigger, NewPanePlacement,
-    NewTabResponse, NewTabUnfocusedResponse, NewTiledPaneInTabResponse,
-    OpenCommandPaneBackgroundResponse, OpenCommandPaneFloatingNearPluginResponse,
-    OpenCommandPaneFloatingResponse, OpenCommandPaneInPlaceOfPaneIdResponse,
-    OpenCommandPaneInPlaceOfPluginResponse, OpenCommandPaneInPlaceResponse,
-    OpenCommandPaneNearPluginResponse, OpenCommandPaneResponse,
+    FocusOrCreateTabResponse, FrameItem, GetFocusedPaneInfoResponse, GetPaneCwdResponse,
+    GetPanePidResponse, GetPaneRunningCommandResponse, HttpVerb, KeyWithModifier,
+    KillSessionsResponse, LayoutInfo, LayoutMetadata, LayoutParsingError, MessageToPlugin,
+    MouseTrigger, NewPanePlacement, NewTabResponse, NewTabUnfocusedResponse,
+    NewTiledPaneInTabResponse, OpenCommandPaneBackgroundResponse,
+    OpenCommandPaneFloatingNearPluginResponse, OpenCommandPaneFloatingResponse,
+    OpenCommandPaneInPlaceOfPaneIdResponse, OpenCommandPaneInPlaceOfPluginResponse,
+    OpenCommandPaneInPlaceResponse, OpenCommandPaneNearPluginResponse, OpenCommandPaneResponse,
     OpenEditPaneInPlaceOfPaneIdResponse, OpenFileFloatingNearPluginResponse,
     OpenFileFloatingResponse, OpenFileInPlaceOfPluginResponse, OpenFileInPlaceResponse,
     OpenFileNearPluginResponse, OpenFileResponse, OpenPaneInNewTabResponse,
@@ -246,6 +246,8 @@ fn is_self_command(command: &PluginCommand) -> bool {
             | PluginCommand::SetSelfCollapsed(..)
             | PluginCommand::SetLiveView(..)
             | PluginCommand::SetLiveViewInput(..)
+            | PluginCommand::SetPaneFrameItems(..)
+            | PluginCommand::SetDefaultFrameItems(..)
     ) || self_command_has_response(command)
 }
 
@@ -828,6 +830,12 @@ fn host_run_plugin_command(mut caller: Caller<'_, PluginEnv>) {
                     ),
                     PluginCommand::SetLiveView(view) => set_live_view(env, view),
                     PluginCommand::SetLiveViewInput(capture) => set_live_view_input(env, capture),
+                    PluginCommand::SetPaneFrameItems(pane_id, items) => {
+                        set_pane_frame_items(env, pane_id.into(), items)
+                    },
+                    PluginCommand::SetDefaultFrameItems(items) => {
+                        set_default_frame_items(env, items)
+                    },
                     PluginCommand::GetSavedSessionPreview(name) => {
                         get_saved_session_preview(env, name)
                     },
@@ -6793,7 +6801,9 @@ fn required_permission(command: &PluginCommand) -> Option<PermissionType> {
         | PluginCommand::ToggleSessionPaneWatch { .. }
         | PluginCommand::FocusSessionPane { .. }
         | PluginCommand::RegisterSettingsEntry(..)
-        | PluginCommand::UnregisterSettingsEntry => PermissionType::ChangeApplicationState,
+        | PluginCommand::UnregisterSettingsEntry
+        | PluginCommand::SetPaneFrameItems(..)
+        | PluginCommand::SetDefaultFrameItems(..) => PermissionType::ChangeApplicationState,
         PluginCommand::CopyToClipboard(..) => PermissionType::WriteToClipboard,
         PluginCommand::SwitchTabTo(..)
         | PluginCommand::SwitchToMode(..)
@@ -7088,6 +7098,25 @@ fn set_live_view(env: &PluginEnv, view: Option<zellij_utils::data::LiveView>) {
         client_id: acting_client(env),
         view,
     });
+}
+
+fn set_pane_frame_items(env: &PluginEnv, pane_id: PaneId, items: Vec<FrameItem>) {
+    let _ = env
+        .senders
+        .send_to_screen(ScreenInstruction::SetPaneFrameItems {
+            plugin_id: self_pane_id(env),
+            pane_id,
+            items,
+        });
+}
+
+fn set_default_frame_items(env: &PluginEnv, items: Vec<FrameItem>) {
+    let _ = env
+        .senders
+        .send_to_screen(ScreenInstruction::SetDefaultFrameItems {
+            plugin_id: self_pane_id(env),
+            items,
+        });
 }
 
 fn set_live_view_input(env: &PluginEnv, capture: bool) {

@@ -95,6 +95,8 @@ enum EventType {
     DesktopIntegration = 69;
     LiveViewStateChanged = 71;
     PluginSettingsEntries = 72;
+    /// A clickable frame item this plugin placed on a pane frame was clicked
+    FrameItemClicked = 73;
 }
 
 message EventNameList {
@@ -166,6 +168,7 @@ message Event {
     string desktop_integration_payload = 61;
     LiveViewStateChangedPayload live_view_state_changed_payload = 63;
     PluginSettingsEntriesPayload plugin_settings_entries_payload = 64;
+    FrameItemClickedPayload frame_item_clicked_payload = 65;
   }
 }
 
@@ -1120,4 +1123,23 @@ message LiveViewStateChangedPayload {
   bool pinned = 7;
   optional LiveViewSize source_size = 8;
   string release_key = 9;
+}
+
+message FrameItem {
+  string id = 1;
+  string text = 2;
+  bool is_clickable = 3;
+}
+
+enum FrameItemMouseButton {
+  FrameItemMouseButtonLeft = 0;
+  FrameItemMouseButtonRight = 1;
+  FrameItemMouseButtonMiddle = 2;
+}
+
+message FrameItemClickedPayload {
+  PaneId pane_id = 1;
+  string item_id = 2;
+  FrameItemMouseButton button = 3;
+  repeated key.Key.KeyModifier modifiers = 4;
 }
