@@ -3718,6 +3718,7 @@ pub fn handle_plugin_crash(plugin_id: PluginId, message: String, senders: Thread
         loading_indication,
     ));
     let _ = senders.send_to_plugin(PluginInstruction::UnregisterSettingsEntry(plugin_id));
+    let _ = senders.send_to_screen(ScreenInstruction::ClearFrameItemsOfPlugin(plugin_id));
 }
 
 pub fn apply_before_close_event_to_plugin(
