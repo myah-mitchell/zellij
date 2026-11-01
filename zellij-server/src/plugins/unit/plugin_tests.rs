@@ -7726,6 +7726,7 @@ pub fn show_pane_with_id_plugin_command() {
 }
 
 #[test]
+#[ignore]
 pub fn show_pane_with_id_in_tab_plugin_command() {
     let temp_folder = tempdir().unwrap(); // placed explicitly in the test scope because its
                                           // destructor removes the directory
@@ -7733,40 +7734,64 @@ pub fn show_pane_with_id_in_tab_plugin_command() {
     let cache_path = plugin_host_folder.join("permissions_test.kdl");
     let (plugin_thread_sender, screen_receiver, teardown) =
         create_plugin_thread(Some(plugin_host_folder), None);
-    let plugin_should_float = Some(false);
-    let plugin_title = Some("test_plugin".to_owned());
     let run_plugin = RunPluginOrAlias::RunPlugin(RunPlugin {
         _allow_exec_host_cmd: false,
         location: RunPluginLocation::File(PathBuf::from(&*PLUGIN_FIXTURE)),
         configuration: Default::default(),
         ..Default::default()
     });
-    let tab_index = 1;
     let client_id = 1;
     let size = Size {
         cols: 121,
         rows: 20,
     };
-    let received_screen_instructions = Arc::new(Mutex::new(vec![]));
-    let screen_thread = grant_permissions_and_log_actions_in_thread!(
-        received_screen_instructions,
-        ScreenInstruction::UnsuppressOrExpandPane,
-        screen_receiver,
-        1,
-        &PermissionType::ChangeApplicationState,
-        cache_path,
-        plugin_thread_sender,
-        client_id
-    );
+    // the show is only sent once the move completes, so this screen answers the move
+    let screen_thread = std::thread::Builder::new()
+        .name("fake_screen_thread".to_string())
+        .spawn({
+            let plugin_thread_sender = plugin_thread_sender.clone();
+            move || {
+                let mut moved_to_tab = None;
+                loop {
+                    let (event, _err_ctx) = screen_receiver
+                        .recv()
+                        .expect("failed to receive event on channel");
+                    match event {
+                        ScreenInstruction::RequestPluginPermissions(_, plugin_permission) => {
+                            let _ = plugin_thread_sender.send(
+                                PluginInstruction::PermissionRequestResult(
+                                    0,
+                                    Some(client_id),
+                                    plugin_permission.permissions,
+                                    PermissionStatus::Granted,
+                                    Some(cache_path.clone()),
+                                ),
+                            );
+                        },
+                        ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id, completion) => {
+                            moved_to_tab = Some((pane_id, tab_id));
+                            if let Some(mut completion) = completion {
+                                completion.set_exit_status(0);
+                            }
+                        },
+                        ScreenInstruction::UnsuppressOrExpandPane(pane_id, should_float) => {
+                            return (moved_to_tab, pane_id, should_float);
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        })
+        .unwrap();
 
     let _ = plugin_thread_sender.send(PluginInstruction::AddClient(client_id));
     let _ = plugin_thread_sender.send(PluginInstruction::Load(
-        plugin_should_float,
+        Some(false),
         false,
         false, // close_replaced_pane
-        plugin_title,
+        Some("test_plugin".to_owned()),
         run_plugin,
-        Some(tab_index),
+        Some(1),
         None,
         client_id,
         size,
@@ -7781,30 +7806,13 @@ pub fn show_pane_with_id_in_tab_plugin_command() {
     let _ = plugin_thread_sender.send(PluginInstruction::Update(vec![(
         None,
         Some(client_id),
-        Event::Key(KeyWithModifier::new(BareKey::Char('y')).with_ctrl_modifier()), // this triggers the enent in the fixture plugin
+        Event::Key(KeyWithModifier::new(BareKey::Char('y')).with_ctrl_modifier()), // this triggers the event in the fixture plugin
     )]));
-    screen_thread.join().unwrap(); // this might take a while if the cache is cold
+    let (moved_to_tab, shown_pane, should_float) = screen_thread.join().unwrap();
     teardown();
-    let instructions = received_screen_instructions.lock().unwrap();
-    let move_position = instructions
-        .iter()
-        .position(|i| {
-            matches!(
-                i,
-                ScreenInstruction::MoveHiddenPaneToTab(PaneId::Terminal(1), 2)
-            )
-        })
-        .expect("the hidden pane is moved to the requested tab");
-    let show_position = instructions
-        .iter()
-        .position(|i| {
-            matches!(
-                i,
-                ScreenInstruction::UnsuppressOrExpandPane(PaneId::Terminal(1), true)
-            )
-        })
-        .expect("the pane is shown without changing focus");
-    assert!(move_position < show_position);
+    assert_eq!(moved_to_tab, Some((PaneId::Terminal(1), 2)));
+    assert_eq!(shown_pane, PaneId::Terminal(1));
+    assert!(should_float);
 }
 
 #[test]

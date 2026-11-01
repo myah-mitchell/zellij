@@ -813,7 +813,7 @@ pub enum ScreenInstruction {
     SuppressPane(PaneId, ClientId),
     UnsuppressPane(PaneId, bool), // bool -> should float if hidden
     UnsuppressOrExpandPane(PaneId, bool), // bool -> should float if hidden
-    MoveHiddenPaneToTab(PaneId, usize), // usize -> tab_id
+    MoveHiddenPaneToTab(PaneId, usize, Option<NotificationEnd>), // usize -> tab_id
     FocusPaneWithId(PaneId, bool, bool, ClientId, Option<NotificationEnd>), // bools:
     // should_float_if_hidden,
     // should_be_in_place_if_hidden
@@ -14276,9 +14276,17 @@ pub(crate) fn screen_thread_main(
                 }
                 screen.log_and_report_session_state()?;
             },
-            ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id) => {
-                // the show that is always queued right after this reports the session state
-                screen.move_hidden_pane_to_tab(pane_id, tab_id);
+            ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id, mut completion) => {
+                if screen.tabs.contains_key(&tab_id) {
+                    // the show that follows reports the session state
+                    screen.move_hidden_pane_to_tab(pane_id, tab_id);
+                    if let Some(c) = completion.as_mut() {
+                        c.set_exit_status(0);
+                    }
+                } else if let Some(c) = completion.as_mut() {
+                    c.set_exit_status(1);
+                    c.set_error_message("Tab not found".to_string());
+                }
             },
             ScreenInstruction::FocusPaneWithId(
                 pane_id,

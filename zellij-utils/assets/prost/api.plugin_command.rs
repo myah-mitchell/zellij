@@ -2426,6 +2426,12 @@ pub struct ShowFloatingPanesPayload {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShowPaneWithIdResponse {
+    #[prost(string, optional, tag="1")]
+    pub error: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ShowFloatingPanesResponse {
     #[prost(oneof="show_floating_panes_response::Result", tags="1, 2")]
     pub result: ::core::option::Option<show_floating_panes_response::Result>,

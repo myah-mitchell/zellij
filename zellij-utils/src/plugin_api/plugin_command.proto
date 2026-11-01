@@ -1676,6 +1676,10 @@ message ShowFloatingPanesPayload {
   optional uint32 tab_id = 1;
 }
 
+message ShowPaneWithIdResponse {
+  optional string error = 1;
+}
+
 message ShowFloatingPanesResponse {
   oneof result {
     bool success = 1;

@@ -20200,3 +20200,30 @@ pub fn pane_hidden_behind_its_scrollback_editor_is_not_moved() {
     assert!(screen.tabs[&0].has_pane_with_pid(&PaneId::Terminal(3)));
     assert!(!screen.tabs[&1].has_pane_with_pid(&PaneId::Terminal(3)));
 }
+
+#[test]
+fn moving_a_hidden_pane_reports_whether_the_tab_exists() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(None, vec![]);
+    let mut move_to_tab = |tab_id| {
+        let (completion, completion_rx) = completion_and_receiver();
+        let _ = mock_screen
+            .to_screen
+            .send(ScreenInstruction::MoveHiddenPaneToTab(
+                PaneId::Terminal(1),
+                tab_id,
+                Some(completion),
+            ));
+        crate::route::wait_for_action_completion(completion_rx, "MoveHiddenPaneToTab", false)
+    };
+    let existing_tab = move_to_tab(0);
+    let missing_tab = move_to_tab(42);
+    mock_screen.teardown(vec![screen_thread]);
+    assert_eq!(existing_tab.exit_status, Some(0));
+    assert_eq!(missing_tab.exit_status, Some(1));
+    assert_eq!(missing_tab.error_message.as_deref(), Some("Tab not found"));
+}

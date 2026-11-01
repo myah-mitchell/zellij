@@ -44,8 +44,9 @@ use zellij_utils::plugin_api::plugin_command::{
     ProtobufOpenTerminalPaneInPlaceOfPaneIdResponse, ProtobufOpenTerminalResponse,
     ProtobufParseLayoutResponse, ProtobufPluginCommand, ProtobufReadConfigResponse,
     ProtobufRenameLayoutResponse, ProtobufSaveLayoutResponse, ProtobufSaveSessionResponse,
-    ProtobufShowFloatingPanesResponse, ProtobufSlotCommandResponse, ProtobufWriteThemeFileResponse,
-    RenameWebTokenResponse, RevokeAllWebTokensResponse, RevokeTokenResponse,
+    ProtobufShowFloatingPanesResponse, ProtobufShowPaneWithIdResponse, ProtobufSlotCommandResponse,
+    ProtobufWriteThemeFileResponse, RenameWebTokenResponse, RevokeAllWebTokensResponse,
+    RevokeTokenResponse,
 };
 use zellij_utils::plugin_api::plugin_ids::{ProtobufPluginIds, ProtobufZellijVersion};
 use zellij_utils::prompt::{PromptRequest, PromptResult};
@@ -1187,19 +1188,31 @@ pub fn show_self(should_float_if_hidden: bool) {
 ///
 /// With a `tab_id` (the [TabInfo::tab_id] of an existing tab), a pane hidden with
 /// [hide_pane_with_id] (or a plugin that hid itself) is first moved to that tab and shown there.
-/// Panes that are not hidden this way, or a `tab_id` that matches no tab, are shown in their own
-/// tab, the same as with `None`.
+/// Panes that are not hidden this way are shown in their own tab, the same as with `None`.
+///
+/// Returns `Err(String)` without showing the pane if no tab has that `tab_id`.
 pub fn show_pane_with_id(
     pane_id: PaneId,
     should_float_if_hidden: bool,
     should_focus_pane: bool,
     tab_id: Option<usize>,
-) {
+) -> Result<(), String> {
     let plugin_command =
         PluginCommand::ShowPaneWithId(pane_id, should_float_if_hidden, should_focus_pane, tab_id);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
+    if tab_id.is_none() {
+        return Ok(());
+    }
+    let response_bytes =
+        bytes_from_stdin().map_err(|e| format!("Failed to read response: {:?}", e))?;
+    let response = ProtobufShowPaneWithIdResponse::decode(response_bytes.as_slice())
+        .map_err(|e| format!("Failed to decode response: {}", e))?;
+    match response.error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Close this plugin pane
