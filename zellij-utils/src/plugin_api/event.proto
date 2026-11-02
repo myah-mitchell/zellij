@@ -689,6 +689,8 @@ enum MouseEventName {
     MouseScrollLeft = 7;
     MouseScrollRight = 8;
     MouseDoubleClick = 9;
+    MouseMiddleClick = 10;
+    MouseMiddleHold = 11;
 }
 
 message TabUpdatePayload {

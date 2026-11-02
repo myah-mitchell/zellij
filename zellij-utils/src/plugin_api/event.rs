@@ -2400,6 +2400,21 @@ impl TryFrom<MouseEventPayload> for Mouse {
                     _ => Err("Malformed payload for mouse double click"),
                 }
             },
+            Some(MouseEventName::MouseMiddleClick) => match mouse_event_payload.mouse_event_payload
+            {
+                Some(mouse_event_payload::MouseEventPayload::Position(position)) => Ok(
+                    Mouse::MiddleClick(position.line as isize, position.column as usize),
+                ),
+                _ => Err("Malformed payload for mouse middle click"),
+            },
+            Some(MouseEventName::MouseMiddleHold) => {
+                match mouse_event_payload.mouse_event_payload {
+                    Some(mouse_event_payload::MouseEventPayload::Position(position)) => Ok(
+                        Mouse::MiddleHold(position.line as isize, position.column as usize),
+                    ),
+                    _ => Err("Malformed payload for mouse middle hold"),
+                }
+            },
             None => Err("Malformed payload for MouseEventName"),
         }
     }
@@ -2489,6 +2504,26 @@ impl TryFrom<Mouse> for MouseEventPayload {
             }),
             Mouse::DoubleClick(line, column) => Ok(MouseEventPayload {
                 mouse_event_name: MouseEventName::MouseDoubleClick as i32,
+                mouse_event_payload: Some(mouse_event_payload::MouseEventPayload::Position(
+                    ProtobufPosition {
+                        line: line as i64,
+                        column: column as i64,
+                    },
+                )),
+                ..Default::default()
+            }),
+            Mouse::MiddleClick(line, column) => Ok(MouseEventPayload {
+                mouse_event_name: MouseEventName::MouseMiddleClick as i32,
+                mouse_event_payload: Some(mouse_event_payload::MouseEventPayload::Position(
+                    ProtobufPosition {
+                        line: line as i64,
+                        column: column as i64,
+                    },
+                )),
+                ..Default::default()
+            }),
+            Mouse::MiddleHold(line, column) => Ok(MouseEventPayload {
+                mouse_event_name: MouseEventName::MouseMiddleHold as i32,
                 mouse_event_payload: Some(mouse_event_payload::MouseEventPayload::Position(
                     ProtobufPosition {
                         line: line as i64,
@@ -4690,6 +4725,8 @@ mod mouse_event_tests {
             Mouse::Release(7, 8),
             Mouse::Hover(9, 10),
             Mouse::DoubleClick(11, 12),
+            Mouse::MiddleClick(13, 14),
+            Mouse::MiddleHold(15, 16),
         ];
         for event in events {
             let payload: MouseEventPayload = event.try_into().expect("encode");
