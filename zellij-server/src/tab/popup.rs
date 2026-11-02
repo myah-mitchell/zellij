@@ -226,7 +226,9 @@ fn mouse_event_for_plugin(event: &MouseEvent, line: isize, column: usize) -> Opt
     match event.event_type {
         MouseEventType::Press if event.left => Some(Mouse::LeftClick(line, column)),
         MouseEventType::Press if event.right => Some(Mouse::RightClick(line, column)),
+        MouseEventType::Press if event.middle => Some(Mouse::MiddleClick(line, column)),
         MouseEventType::Motion if event.left => Some(Mouse::Hold(line, column)),
+        MouseEventType::Motion if event.middle => Some(Mouse::MiddleHold(line, column)),
         MouseEventType::Motion if !event.right && !event.middle => Some(Mouse::Hover(line, column)),
         MouseEventType::Release => Some(Mouse::Release(line, column)),
         _ => None,
@@ -1075,6 +1077,33 @@ impl Tab {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_button_press_and_drag_reaches_a_popup_plugin_as_its_own_event() {
+        use zellij_utils::input::mouse::MouseEvent;
+        let position = Position::new(2, 3);
+        let events = [
+            MouseEvent::new_left_press_event(position),
+            MouseEvent::new_right_press_event(position),
+            MouseEvent::new_middle_press_event(position),
+            MouseEvent::new_left_motion_event(position),
+            MouseEvent::new_middle_motion_event(position),
+            MouseEvent::new_right_motion_event(position),
+            MouseEvent::new_middle_release_event(position),
+        ];
+        assert_eq!(
+            events.map(|event| mouse_event_for_plugin(&event, 1, 2)),
+            [
+                Some(Mouse::LeftClick(1, 2)),
+                Some(Mouse::RightClick(1, 2)),
+                Some(Mouse::MiddleClick(1, 2)),
+                Some(Mouse::Hold(1, 2)),
+                Some(Mouse::MiddleHold(1, 2)),
+                None,
+                Some(Mouse::Release(1, 2)),
+            ]
+        );
+    }
 
     #[test]
     fn every_wheel_direction_reaches_a_popup_plugin() {
