@@ -217,6 +217,12 @@ fn mouse_event_for_plugin(event: &MouseEvent, line: isize, column: usize) -> Opt
     if event.wheel_down {
         return Some(Mouse::ScrollDown(wheel_lines));
     }
+    if event.wheel_left {
+        return Some(Mouse::ScrollLeft(wheel_lines));
+    }
+    if event.wheel_right {
+        return Some(Mouse::ScrollRight(wheel_lines));
+    }
     match event.event_type {
         MouseEventType::Press if event.left => Some(Mouse::LeftClick(line, column)),
         MouseEventType::Press if event.right => Some(Mouse::RightClick(line, column)),
@@ -907,7 +913,7 @@ impl Tab {
         } else {
             (-1, 0)
         };
-        let is_wheel = event.wheel_up || event.wheel_down;
+        let is_wheel = event.wheel_up || event.wheel_down || event.wheel_left || event.wheel_right;
         if is_wheel && !inside {
             return Some(PopupMouseOutcome::Consumed);
         }
@@ -1069,6 +1075,32 @@ impl Tab {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_wheel_direction_reaches_a_popup_plugin() {
+        use zellij_utils::input::mouse::MouseEvent;
+        let position = Position::new(2, 3);
+        let lines = |event: &MouseEvent| {
+            super::super::mouse_handler::wheel_steps(
+                event,
+                super::super::mouse_handler::CLASSIC_WHEEL_LINES,
+            )
+            .0
+        };
+        let up = MouseEvent::new_scroll_up_event(position);
+        let down = MouseEvent::new_scroll_down_event(position);
+        let left = MouseEvent::new_scroll_left_event(position);
+        let right = MouseEvent::new_scroll_right_event(position);
+        assert_eq!(
+            [&up, &down, &left, &right].map(|event| mouse_event_for_plugin(event, 1, 2)),
+            [
+                Some(Mouse::ScrollUp(lines(&up))),
+                Some(Mouse::ScrollDown(lines(&down))),
+                Some(Mouse::ScrollLeft(lines(&left))),
+                Some(Mouse::ScrollRight(lines(&right))),
+            ]
+        );
+    }
 
     fn popup_in(corner: PopupCorner, rows: usize) -> (PopupPlacement, usize, usize) {
         (PopupPlacement::Corner(corner), 20, rows)
