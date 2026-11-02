@@ -870,6 +870,10 @@ impl Tab {
             || self.pane_being_resized_with_mouse.is_some()
             || self.floating_panes.pane_is_being_moved_with_mouse()
             || !self.pane_drawings.is_empty()
+            || self
+                .mouse_press_owner
+                .values()
+                .any(|owner| matches!(owner, super::mouse_handler::MousePressOwner::Plugin(_)))
     }
     pub fn clear_hover_under_popups(&mut self, client_id: ClientId) -> bool {
         super::mouse_handler::clear_hover_for_client(self, client_id)

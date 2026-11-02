@@ -186,6 +186,8 @@ pub fn pane_drawing_outline(area: &Viewport, color: PaletteColor) -> Vec<Charact
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MousePressOwner {
     App(PaneId),
+    // a plugin pane that got a middle press, so the drag and release go to it too
+    Plugin(PaneId),
     Group,
     Swallow,
 }
@@ -384,6 +386,11 @@ enum MouseAction {
         position: Position,
     },
     ForwardRightClickToPlugin {
+        pane_id: PaneId,
+        position: Position,
+    },
+    // a middle press, drag or release, told apart by the event type
+    ForwardMiddleButtonToPlugin {
         pane_id: PaneId,
         position: Position,
     },
@@ -683,6 +690,9 @@ impl MouseHandler {
                 MouseAction::SendToTerminal { pane_id, .. }
                 | MouseAction::FocusPaneAndClickThrough { pane_id, .. } => {
                     Some(MousePressOwner::App(*pane_id))
+                },
+                MouseAction::ForwardMiddleButtonToPlugin { pane_id, .. } => {
+                    Some(MousePressOwner::Plugin(*pane_id))
                 },
                 MouseAction::GroupToggle(_) => Some(MousePressOwner::Group),
                 MouseAction::StartSelection { .. }
@@ -1464,6 +1474,25 @@ impl MouseHandler {
                 }
                 Ok(MouseEffect::default())
             },
+            MouseAction::ForwardMiddleButtonToPlugin { pane_id, position } => {
+                if let Some(pane) = tab.get_pane_with_id_mut(pane_id) {
+                    let relative_position = pane.relative_position(&position);
+                    match event.event_type {
+                        MouseEventType::Press => pane.handle_middle_click(
+                            &relative_position,
+                            click_modifiers(event),
+                            client_id,
+                        ),
+                        MouseEventType::Motion => {
+                            pane.handle_middle_hold(&relative_position, client_id)
+                        },
+                        MouseEventType::Release => {
+                            pane.handle_middle_release(&relative_position, client_id)
+                        },
+                    }
+                }
+                Ok(MouseEffect::default())
+            },
             MouseAction::StartDrawingPane {
                 pane_id,
                 position,
@@ -2209,6 +2238,13 @@ impl MouseHandler {
                 pane_id,
                 event: *event,
             },
+            Some(MousePressOwner::Plugin(pane_id)) if event.middle => {
+                MouseAction::ForwardMiddleButtonToPlugin {
+                    pane_id,
+                    position: event.position,
+                }
+            },
+            Some(MousePressOwner::Plugin(_)) => MouseAction::NoAction,
             Some(MousePressOwner::Group) => {
                 match (event.left, event.event_type, ctx.pane_id_at_position) {
                     (true, MouseEventType::Motion, Some(pane_id)) => MouseAction::GroupAdd(pane_id),
@@ -2576,6 +2612,10 @@ impl MouseHandler {
                     pane_id: details.pane_id,
                     position: event.position,
                 },
+                MouseButton::Middle => MouseAction::ForwardMiddleButtonToPlugin {
+                    pane_id: details.pane_id,
+                    position: event.position,
+                },
                 _ => MouseAction::NoAction,
             };
         }
@@ -2592,6 +2632,12 @@ impl MouseHandler {
                 MouseButton::Right if !details.on_frame => MouseAction::ForwardRightClickToPlugin {
                     pane_id: details.pane_id,
                     position: event.position,
+                },
+                MouseButton::Middle if !details.on_frame => {
+                    MouseAction::ForwardMiddleButtonToPlugin {
+                        pane_id: details.pane_id,
+                        position: event.position,
+                    }
                 },
                 _ => MouseAction::NoAction,
             };
@@ -3407,6 +3453,96 @@ mod tests {
                 event,
             }
         );
+    }
+
+    fn middle_to_plugin(pane_id: PaneId, position: Position) -> MouseAction {
+        MouseAction::ForwardMiddleButtonToPlugin { pane_id, position }
+    }
+
+    fn focused_plugin_context() -> MouseEventContext {
+        let mut context = context_with(clicked(PaneId::Plugin(3)));
+        context.active_pane_id = Some(PaneId::Plugin(3));
+        context
+    }
+
+    #[test]
+    fn middle_press_on_focused_plugin_is_forwarded_to_the_plugin() {
+        let position = Position::new(3, 4);
+        let event = MouseEvent::new_middle_press_event(position);
+        assert_eq!(
+            MouseHandler::determine_mouse_action(&event, &focused_plugin_context()).unwrap(),
+            middle_to_plugin(PaneId::Plugin(3), position)
+        );
+    }
+
+    #[test]
+    fn middle_press_on_focused_plugin_frame_is_not_forwarded() {
+        let mut context = focused_plugin_context();
+        context.clicked_pane.as_mut().unwrap().on_frame = true;
+        let event = MouseEvent::new_middle_press_event(Position::new(0, 4));
+        assert_eq!(
+            MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+            MouseAction::NoAction
+        );
+    }
+
+    #[test]
+    fn middle_press_on_unfocused_plugin_is_dropped() {
+        let context = context_with(clicked(PaneId::Plugin(3)));
+        let event = MouseEvent::new_middle_press_event(Position::new(3, 4));
+        assert_eq!(
+            MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+            MouseAction::NoAction
+        );
+    }
+
+    #[test]
+    fn middle_press_on_bar_is_forwarded_to_the_bar_plugin() {
+        let position = Position::new(0, 10);
+        let mut details = clicked(PaneId::Plugin(7));
+        details.is_unselectable_plugin = true;
+        let event = MouseEvent::new_middle_press_event(position);
+        assert_eq!(
+            MouseHandler::determine_mouse_action(&event, &context_with(details)).unwrap(),
+            middle_to_plugin(PaneId::Plugin(7), position)
+        );
+    }
+
+    #[test]
+    fn middle_drag_and_release_follow_the_plugin_that_got_the_press() {
+        // the pointer has left the plugin and is over a terminal
+        let mut context = context_with(clicked(PaneId::Terminal(1)));
+        context.press_owner = Some(MousePressOwner::Plugin(PaneId::Plugin(3)));
+        let position = Position::new(8, 9);
+        for event in [
+            MouseEvent::new_middle_motion_event(position),
+            MouseEvent::new_middle_release_event(position),
+        ] {
+            assert_eq!(
+                MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+                middle_to_plugin(PaneId::Plugin(3), position),
+                "{:?}",
+                event
+            );
+        }
+    }
+
+    #[test]
+    fn left_events_during_a_plugin_middle_press_are_not_forwarded() {
+        let mut context = focused_plugin_context();
+        context.press_owner = Some(MousePressOwner::Plugin(PaneId::Plugin(3)));
+        let position = Position::new(3, 4);
+        for event in [
+            MouseEvent::new_left_motion_event(position),
+            MouseEvent::new_left_release_event(position),
+        ] {
+            assert_eq!(
+                MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+                MouseAction::NoAction,
+                "{:?}",
+                event
+            );
+        }
     }
 
     fn menu_off(details: ClickedPaneDetails) -> MouseEventContext {

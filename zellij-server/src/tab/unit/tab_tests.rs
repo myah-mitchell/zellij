@@ -18094,6 +18094,104 @@ fn horizontal_scroll_over_a_plugin_pane_is_sent_to_the_plugin_in_the_same_direct
     );
 }
 
+fn middle_button_events_sent_to_plugin(
+    plugin_receiver: &Receiver<(PluginInstruction, ErrorContext)>,
+) -> Vec<(Option<u32>, Event)> {
+    use zellij_utils::data::Mouse;
+    let mut events = vec![];
+    while let Ok((instruction, _)) = plugin_receiver.try_recv() {
+        if let PluginInstruction::Update(updates) = instruction {
+            for (pid, _client_id, event) in updates {
+                match &event {
+                    Event::Mouse(
+                        Mouse::MiddleClick(..) | Mouse::MiddleHold(..) | Mouse::Release(..),
+                    )
+                    | Event::MouseWithModifiers(Mouse::MiddleClick(..), _) => {
+                        events.push((pid, event))
+                    },
+                    _ => {},
+                }
+            }
+        }
+    }
+    events
+}
+
+#[test]
+fn a_middle_press_drag_and_release_over_a_plugin_pane_are_sent_to_the_plugin() {
+    use zellij_utils::data::Mouse;
+    use zellij_utils::input::mouse::MouseEvent;
+    let (mut tab, plugin_receiver) = tab_with_floating_plugin_pane(1);
+    let plugin_pane = tab.get_pane_with_id(PaneId::Plugin(1)).unwrap();
+    let (content_x, content_y) = (plugin_pane.get_content_x(), plugin_pane.get_content_y());
+    let at = |line: usize, column: usize| {
+        Position::new((content_y + line) as i32, (content_x + column) as u16)
+    };
+    while plugin_receiver.try_recv().is_ok() {}
+
+    tab.handle_mouse_event(&MouseEvent::new_middle_press_event(at(1, 1)), 1)
+        .unwrap();
+    tab.handle_mouse_event(&MouseEvent::new_middle_motion_event(at(2, 3)), 1)
+        .unwrap();
+    tab.handle_mouse_event(&MouseEvent::new_middle_release_event(at(2, 4)), 1)
+        .unwrap();
+
+    assert_eq!(
+        middle_button_events_sent_to_plugin(&plugin_receiver),
+        vec![
+            (Some(1), Event::Mouse(Mouse::MiddleClick(1, 1))),
+            (Some(1), Event::Mouse(Mouse::MiddleHold(2, 3))),
+            (Some(1), Event::Mouse(Mouse::Release(2, 4))),
+        ]
+    );
+}
+
+#[test]
+fn a_middle_press_on_a_plugin_pane_is_held_until_its_release() {
+    use zellij_utils::input::mouse::MouseEvent;
+    let (mut tab, _plugin_receiver) = tab_with_floating_plugin_pane(1);
+    let plugin_pane = tab.get_pane_with_id(PaneId::Plugin(1)).unwrap();
+    let position = Position::new(
+        (plugin_pane.get_content_y() + 1) as i32,
+        (plugin_pane.get_content_x() + 1) as u16,
+    );
+    assert!(!tab.mouse_gesture_is_held());
+    tab.handle_mouse_event(&MouseEvent::new_middle_press_event(position), 1)
+        .unwrap();
+    assert!(tab.mouse_gesture_is_held());
+    tab.handle_mouse_event(&MouseEvent::new_middle_release_event(position), 1)
+        .unwrap();
+    assert!(!tab.mouse_gesture_is_held());
+}
+
+#[test]
+fn a_middle_press_with_ctrl_over_a_plugin_pane_carries_the_modifier() {
+    use zellij_utils::data::{KeyModifier, Mouse};
+    use zellij_utils::input::mouse::MouseEvent;
+    let (mut tab, plugin_receiver) = tab_with_floating_plugin_pane(1);
+    let plugin_pane = tab.get_pane_with_id(PaneId::Plugin(1)).unwrap();
+    let position = Position::new(
+        (plugin_pane.get_content_y() + 1) as i32,
+        (plugin_pane.get_content_x() + 1) as u16,
+    );
+    while plugin_receiver.try_recv().is_ok() {}
+
+    let mut press = MouseEvent::new_middle_press_event(position);
+    press.ctrl = true;
+    tab.handle_mouse_event(&press, 1).unwrap();
+
+    assert_eq!(
+        middle_button_events_sent_to_plugin(&plugin_receiver),
+        vec![(
+            Some(1),
+            Event::MouseWithModifiers(
+                Mouse::MiddleClick(1, 1),
+                [KeyModifier::Ctrl].into_iter().collect()
+            )
+        )]
+    );
+}
+
 #[test]
 fn a_floating_plugin_pane_is_not_shown_while_the_floating_surface_is_hidden() {
     let (mut tab, _plugin_receiver) = tab_with_floating_plugin_pane(1);
