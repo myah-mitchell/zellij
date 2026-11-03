@@ -48,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * performance: improve output/stdout/scrolling speed (https://github.com/zellij-org/zellij/pull/5815)
 * feat: standard macOS menu for the desktop window and save window state when quitting from the Dock (https://github.com/zellij-org/zellij/pull/5782)
 * feat: plugins can add clickable items to pane frames
+* (BREAKING CHANGE zellij-tile) `show_pane_with_id` takes a `tab_id` to show a hidden pane in that tab, and returns a `Result`
+    * Migration help: add `None` as the last argument to keep the current behavior; with `None` the result is always `Ok(())`
 
 
 ## [0.45.1] - 2026-08-28
