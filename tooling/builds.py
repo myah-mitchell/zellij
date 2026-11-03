@@ -39,7 +39,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # What builds.yml can compile, in the order it lists them. Linux runners are
 # pinned rather than ubuntu-latest, since linux-gnu's binary needs a glibc at
 # least as new as the one it was built against (2.39 on 24.04). `bin` is where the
-# binary lands, and `test` is the suite the job runs before building: Linux
+# binary lands, and `test` is the suite a test job runs next to the build: Linux
 # runs everything once, on whichever Linux target the build has first.
 TARGETS = {
     "linux-musl": {

@@ -13,8 +13,10 @@
 #   plan      works out which builds this run makes
 #   assemble  merges each build's stack onto its base with tooling/builds.py,
 #             pushes the result to build/<name>, and picks its tag
-#   build     for each build and target: tests, compiles, keeps the archive
-#   publish   for each build whose archives all exist: tags and releases it
+#   build     for each build and target: compiles and keeps the archive, and
+#             in a parallel job runs that platform's tests
+#   publish   for each build whose archives and test records all exist: tags
+#             and releases it
 #
 # Builds are independent of each other from assemble on. One that fails to
 # merge, test or compile is reported and left out, and the rest still publish.
@@ -181,7 +183,11 @@ jobs:
           fi
           # One entry per build and target, since each build picks its own
           # targets and a matrix of builds x targets cannot leave some out.
-          jobs="$(jq -c '[.[] | del(.targets) as $b | .targets[] | {build: $b, target: .}]' <<<"${builds}")"
+          # A target that runs a suite gets a second entry that only tests,
+          # so the tests and the release build run side by side.
+          jobs="$(jq -c '[.[] | del(.targets) as $b | .targets[]
+            | ({build: $b, target: ., role: "build"},
+               (select(.test != "") | {build: $b, target: ., role: "test"}))]' <<<"${builds}")"
           {
             echo "builds=${builds}"
             echo "jobs=${jobs}"
@@ -193,16 +199,17 @@ jobs:
             exit 1
           fi
 
-  # Each job tests the platform it builds for, then compiles, then keeps the
-  # archive. An archive therefore exists only if its tests and build passed,
-  # and that is what publish checks: one build failing never holds back
-  # another, which a separate test job could not promise, since a job that
-  # needs a matrix waits on all of it.
+  # Each matrix entry has a role. A build entry compiles and keeps the archive;
+  # a test entry runs its platform's suite and keeps a marker file saying it
+  # passed. They run side by side, and publish requires every archive and
+  # every marker of a build, so nothing is released untested. Keeping both
+  # roles in one matrix, and checking files rather than job results, means one
+  # build failing never holds back another: a job that needs a matrix waits on
+  # all of it and sees only one result for the whole of it.
   #
   # Tests are what upstream's rust.yml runs: everything on Linux, and on
   # Windows the library tests of the three crates upstream keeps passing there.
-  # A build with both Linux targets runs the Linux tests once, on the first,
-  # and publish requires both.
+  # A build with both Linux targets runs the Linux tests once, on the first.
   #
   # The targets themselves are defined in tooling/builds.py (TARGETS), and
   # each build lists the ones it wants in builds.toml:
@@ -212,7 +219,7 @@ jobs:
   #               Wayland or X11 libraries (WSLg under WSL2)
   #   windows     MSVC, with the C runtime linked in
   build:
-    name: ${{ matrix.build.name }} (${{ matrix.target.name }})
+    name: ${{ matrix.build.name }} (${{ matrix.target.name }}, ${{ matrix.role }})
     needs: assemble
     if: ${{ !cancelled() && needs.assemble.outputs.jobs != '' && needs.assemble.outputs.jobs != '[]' }}
     permissions:
@@ -274,24 +281,42 @@ jobs:
       #
       # This also restores and saves a cache of compiled dependencies. Its key
       # names the job and OS but not the matrix entry, and a key is saved only
-      # once, so without cache-key both Linux targets would share one cache
-      # that only the first job to finish ever fills.
+      # once, so without cache-key every target and role would share one cache
+      # that only the first job to finish ever fills. Tests compile a debug
+      # build and the build role a release one, so they keep separate caches.
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           rustflags: ""
-          cache-key: ${{ matrix.target.name }}
+          cache-key: ${{ matrix.target.name }}-${{ matrix.role }}
 
       - name: Test
-        if: matrix.target.test == 'linux'
+        if: matrix.role == 'test' && matrix.target.test == 'linux'
         run: cargo xtask test
 
       - name: Test
-        if: matrix.target.test == 'windows'
+        if: matrix.role == 'test' && matrix.target.test == 'windows'
         run: |
           cargo test --no-default-features -p zellij-utils --lib
           cargo test --no-default-features -p zellij-server --lib
           cargo test --no-default-features -p zellij-client --lib
+
+      # Reached only when the suite passed. Named so publish's download of
+      # this build's artifacts picks it up next to the archives.
+      - name: Record the passed tests
+        if: matrix.role == 'test'
+        shell: bash
+        run: |
+          mkdir dist
+          echo "${{ matrix.build.sha }}" > "dist/tests-${{ matrix.target.test }}.passed"
+
+      - name: Keep the test record
+        if: matrix.role == 'test'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.build.name }}--tests-${{ matrix.target.test }}
+          path: dist/*
+          if-no-files-found: error
 
       # Upstream's release.yml builds musl with `cargo xtask ci cross`, which
       # compiles inside a container so that it can reach other architectures.
@@ -299,20 +324,20 @@ jobs:
       # the build out of reach of the dependency cache. This is the native
       # build upstream's own e2e job uses: plugins first, then zellij.
       - name: Build
-        if: matrix.target.name == 'linux-musl'
+        if: matrix.role == 'build' && matrix.target.name == 'linux-musl'
         run: |
           cargo xtask build --release --plugins-only
           cargo build --release --target x86_64-unknown-linux-musl
 
       # The commands upstream's release.yml uses for these targets.
       - name: Build
-        if: matrix.target.name == 'linux-gnu'
+        if: matrix.role == 'build' && matrix.target.name == 'linux-gnu'
         run: cargo xtask ci build-release
 
       # crt-static links the C runtime in, so zellij.exe runs without the
       # Visual C++ redistributable installed.
       - name: Build
-        if: matrix.target.name == 'windows'
+        if: matrix.role == 'build' && matrix.target.name == 'windows'
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo xtask ci build-release
@@ -320,7 +345,7 @@ jobs:
       # Named as upstream names its own archives, so they drop into anything
       # that already unpacks a zellij release.
       - name: Archive
-        if: runner.os == 'Linux'
+        if: matrix.role == 'build' && runner.os == 'Linux'
         run: |
           set -euo pipefail
           mkdir dist
@@ -330,7 +355,7 @@ jobs:
       # without a console behind it. Included when the build has one, as
       # upstream's release does.
       - name: Archive
-        if: runner.os == 'Windows'
+        if: matrix.role == 'build' && runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -344,6 +369,7 @@ jobs:
       # directory both downloads landed in. Upstream hashes the unpacked
       # binary at its build path instead.
       - name: Checksum
+        if: matrix.role == 'build'
         shell: bash
         working-directory: dist
         run: |
@@ -352,6 +378,7 @@ jobs:
           cat "zellij-${{ matrix.target.triple }}.sha256sum"
 
       - name: Keep the archive
+        if: matrix.role == 'build'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.build.name }}--zellij-${{ matrix.target.triple }}
@@ -377,8 +404,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Never publish a release with one of its targets missing.
-      - name: Check every target built
+      # Never publish a release with one of its targets missing, or with a
+      # suite that did not pass.
+      - name: Check every target built and tested
         working-directory: dist
         env:
           BUILD: ${{ toJSON(matrix.build) }}
@@ -387,7 +415,11 @@ jobs:
           missing=0
           for triple in $(jq -r '.targets[].triple' <<<"${BUILD}"); do
             compgen -G "zellij-${triple}.*" > /dev/null \
-              || { echo "::error::zellij-${triple} is missing: its tests or build failed."; missing=1; }
+              || { echo "::error::zellij-${triple} is missing: its build failed."; missing=1; }
+          done
+          for suite in $(jq -r '.targets[].test | select(. != "")' <<<"${BUILD}"); do
+            [[ -f "tests-${suite}.passed" ]] \
+              || { echo "::error::The ${suite} tests did not pass."; missing=1; }
           done
           exit "${missing}"
 

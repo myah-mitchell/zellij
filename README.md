@@ -121,8 +121,10 @@ stacked ref with the commit each was at, then the conventional commits since
 the previous release with the same tag prefix. A series' first release covers
 everything since the upstream release its base descends from.
 
-A build is only published when all of its archives exist, and each archive only
-exists if its platform's tests passed. Linux runs the whole `cargo xtask test`;
+A build is only published when all of its archives exist and all of its tests
+passed. Each platform's tests run in their own job, next to the jobs that
+compile, and leave a record that publish checks for. Linux runs the whole
+`cargo xtask test`, once per build;
 Windows runs the library tests of `zellij-utils`, `zellij-server` and
 `zellij-client`, which is what upstream keeps passing there. Upstream's own
 `rust.yml` and `e2e.yml` are disabled here (see
