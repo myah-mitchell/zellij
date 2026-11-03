@@ -805,6 +805,44 @@ impl Pane for PluginPane {
             )]))
             .unwrap();
     }
+    fn handle_middle_click(
+        &mut self,
+        to: &Position,
+        modifiers: BTreeSet<KeyModifier>,
+        client_id: ClientId,
+    ) {
+        let click = Mouse::MiddleClick(to.line.0, to.column.0);
+        let event = if modifiers.is_empty() {
+            Event::Mouse(click)
+        } else {
+            Event::MouseWithModifiers(click, modifiers)
+        };
+        self.send_plugin_instructions
+            .send(PluginInstruction::Update(vec![(
+                Some(self.pid),
+                Some(client_id),
+                event,
+            )]))
+            .unwrap();
+    }
+    fn handle_middle_hold(&mut self, to: &Position, client_id: ClientId) {
+        self.send_plugin_instructions
+            .send(PluginInstruction::Update(vec![(
+                Some(self.pid),
+                Some(client_id),
+                Event::Mouse(Mouse::MiddleHold(to.line.0, to.column.0)),
+            )]))
+            .unwrap();
+    }
+    fn handle_middle_release(&mut self, to: &Position, client_id: ClientId) {
+        self.send_plugin_instructions
+            .send(PluginInstruction::Update(vec![(
+                Some(self.pid),
+                Some(client_id),
+                Event::Mouse(Mouse::Release(to.line.0, to.column.0)),
+            )]))
+            .unwrap();
+    }
     fn add_red_pane_frame_color_override(&mut self, error_text: Option<String>) {
         self.pane_frame_color_override = Some((self.style.colors.exit_code_error.base, error_text));
     }
