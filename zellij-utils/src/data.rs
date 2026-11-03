@@ -1377,6 +1377,7 @@ pub enum Event {
         source_size: Option<crate::pane_size::Size>,
         release_key: String,
     },
+    FrameItemClicked(FrameItemClick),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -4154,6 +4155,41 @@ impl LiveView {
     }
 }
 
+/// A piece of text a plugin places on a pane's frame, at the right of its top row.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct FrameItem {
+    /// Reported back in [FrameItemClick] when the item is clicked
+    pub id: String,
+    /// Shown as is, without padding, with control characters removed
+    pub text: String,
+    /// Clicks on a clickable item go to the plugin instead of the pane frame
+    pub is_clickable: bool,
+}
+
+impl FrameItem {
+    pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
+        FrameItem {
+            id: id.into(),
+            text: text.into(),
+            is_clickable: false,
+        }
+    }
+    pub fn clickable(mut self) -> Self {
+        self.is_clickable = true;
+        self
+    }
+}
+
+/// A click on a clickable [FrameItem], sent only to the plugin that placed the item
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameItemClick {
+    pub pane_id: PaneId,
+    pub item_id: String,
+    /// One of [MouseButton::Left], [MouseButton::Right] or [MouseButton::Middle]
+    pub button: MouseButton,
+    pub modifiers: BTreeSet<KeyModifier>,
+}
+
 pub const DEFAULT_LIVE_VIEW_RELEASE_KEY: &str = "F9";
 pub const LIVE_VIEW_DOUBLE_PRESS_MS: u64 = 400;
 
@@ -5434,6 +5470,8 @@ pub enum PluginCommand {
     ShowBars,
     RegisterSettingsEntry(String),
     UnregisterSettingsEntry,
+    SetPaneFrameItems(PaneId, Vec<FrameItem>),
+    SetDefaultFrameItems(Vec<FrameItem>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

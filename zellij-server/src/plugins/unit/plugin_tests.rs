@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 use wasmi::Engine;
 use zellij_utils::data::{
-    BareKey, Event, InputMode, KeyWithModifier, ModeInfo, PermissionStatus, PermissionType,
+    BareKey, Event, FrameItem, InputMode, KeyWithModifier, ModeInfo, PermissionStatus,
+    PermissionType,
 };
 use zellij_utils::errors::ErrorContext;
 use zellij_utils::input::actions::Action;
@@ -14828,4 +14829,98 @@ pub fn a_reloaded_plugin_loses_its_settings_entry_until_it_registers_again() {
             "PluginSettingsEntries([PluginSettingsEntry { plugin_id: 1, title: \"Fixture settings\" }])",
         );
     });
+}
+
+#[test]
+#[ignore]
+pub fn set_pane_and_default_frame_items_plugin_commands() {
+    let temp_folder = tempdir().unwrap(); // placed explicitly in the test scope because its
+                                          // destructor removes the directory
+    let plugin_host_folder = PathBuf::from(temp_folder.path());
+    let cache_path = plugin_host_folder.join("permissions_test.kdl");
+    let (plugin_thread_sender, screen_receiver, teardown) =
+        create_plugin_thread(Some(plugin_host_folder), None);
+    let plugin_should_float = Some(false);
+    let plugin_title = Some("test_plugin".to_owned());
+    let run_plugin = RunPluginOrAlias::RunPlugin(RunPlugin {
+        _allow_exec_host_cmd: false,
+        location: RunPluginLocation::File(PathBuf::from(&*PLUGIN_FIXTURE)),
+        configuration: Default::default(),
+        ..Default::default()
+    });
+    let tab_index = 1;
+    let client_id = 1;
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let received_screen_instructions = Arc::new(Mutex::new(vec![]));
+    let screen_thread = grant_permissions_and_log_actions_in_thread_struct_variant!(
+        received_screen_instructions,
+        ScreenInstruction::SetDefaultFrameItems,
+        screen_receiver,
+        1,
+        &PermissionType::ChangeApplicationState,
+        cache_path,
+        plugin_thread_sender,
+        client_id
+    );
+
+    let _ = plugin_thread_sender.send(PluginInstruction::AddClient(client_id));
+    let _ = plugin_thread_sender.send(PluginInstruction::Load(
+        plugin_should_float,
+        false,
+        false, // close_replaced_pane
+        plugin_title,
+        run_plugin,
+        Some(tab_index),
+        None,
+        client_id,
+        size,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    // the fixture places items on a pane for ctrl-shift-k and default items for ctrl-shift-l
+    for key in ['k', 'l'] {
+        let _ = plugin_thread_sender.send(PluginInstruction::Update(vec![(
+            None,
+            Some(client_id),
+            Event::Key(
+                KeyWithModifier::new(BareKey::Char(key))
+                    .with_ctrl_modifier()
+                    .with_shift_modifier(),
+            ),
+        )]));
+    }
+    screen_thread.join().unwrap(); // this might take a while if the cache is cold
+    teardown();
+    let instructions = received_screen_instructions.lock().unwrap();
+    let pane_items_sender = instructions
+        .iter()
+        .find_map(|i| match i {
+            ScreenInstruction::SetPaneFrameItems {
+                plugin_id,
+                pane_id: PaneId::Terminal(1),
+                items,
+            } if items == &vec![FrameItem::new("close", "[X]").clickable()] => Some(*plugin_id),
+            _ => None,
+        })
+        .expect("the items for the pane reach the screen");
+    let default_items_sender = instructions
+        .iter()
+        .find_map(|i| match i {
+            ScreenInstruction::SetDefaultFrameItems { plugin_id, items }
+                if items == &vec![FrameItem::new("status", "ok")] =>
+            {
+                Some(*plugin_id)
+            },
+            _ => None,
+        })
+        .expect("the default items reach the screen");
+    assert_eq!(pane_items_sender, default_items_sender);
 }

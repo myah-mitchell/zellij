@@ -990,6 +990,19 @@ impl ZellijPlugin for State {
                         PreviewAnchor::LastCommandOutput,
                     );
                 },
+                BareKey::Char('k')
+                    if key.has_only_modifiers(&[KeyModifier::Ctrl, KeyModifier::Shift]) =>
+                {
+                    set_pane_frame_items(
+                        PaneId::Terminal(1),
+                        vec![FrameItem::new("close", "[X]").clickable()],
+                    );
+                },
+                BareKey::Char('l')
+                    if key.has_only_modifiers(&[KeyModifier::Ctrl, KeyModifier::Shift]) =>
+                {
+                    set_default_frame_items(vec![FrameItem::new("status", "ok")]);
+                },
                 BareKey::Char('a')
                     if key.has_only_modifiers(&[KeyModifier::Ctrl, KeyModifier::Shift]) =>
                 {

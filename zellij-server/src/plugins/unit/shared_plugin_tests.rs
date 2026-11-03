@@ -80,6 +80,8 @@ struct ScreenLog {
     render_log: Vec<(PluginId, ClientId, String)>,
     collapsed: HashSet<PaneId>,
     granted: Vec<PluginId>,
+    frame_items_set_by: Vec<PluginId>,
+    frame_items_cleared_for: Vec<PluginId>,
 }
 
 impl ScreenLog {
@@ -96,6 +98,8 @@ impl ScreenLog {
             render_log: vec![],
             collapsed: HashSet::new(),
             granted: vec![],
+            frame_items_set_by: vec![],
+            frame_items_cleared_for: vec![],
         }
     }
     fn receive_one(&mut self, timeout: Duration) {
@@ -130,6 +134,12 @@ impl ScreenLog {
             ScreenInstruction::SetPaneCollapsed(pane_id, true) => {
                 self.collapsed.insert(pane_id);
             },
+            ScreenInstruction::SetDefaultFrameItems { plugin_id, .. } => {
+                self.frame_items_set_by.push(plugin_id);
+            },
+            ScreenInstruction::ClearFrameItemsOfPlugin(plugin_id) => {
+                self.frame_items_cleared_for.push(plugin_id);
+            },
             _ => {},
         }
     }
@@ -150,6 +160,15 @@ impl ScreenLog {
         while self.granted.len() < count {
             if Instant::now() > deadline {
                 panic!("timed out waiting for {} permission grants", count);
+            }
+            self.receive_one(Duration::from_millis(100));
+        }
+    }
+    fn wait_for(&mut self, description: &str, condition: impl Fn(&ScreenLog) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !condition(self) {
+            if Instant::now() > deadline {
+                panic!("timed out waiting for: {}", description);
             }
             self.receive_one(Duration::from_millis(100));
         }
@@ -715,6 +734,71 @@ pub fn a_shared_plugin_reloaded_by_url_loses_its_settings_entry() {
     ));
     screen.wait_until("the observer no longer lists the entry", |renders| {
         observed_settings_entries(renders).as_deref() == Some("PluginSettingsEntries([])")
+    });
+    teardown();
+}
+
+fn shared_slot_with_frame_items(
+    sender: &SenderWithContext<PluginInstruction>,
+    screen: &mut ScreenLog,
+    client_id: ClientId,
+) -> PluginId {
+    load(
+        sender,
+        shared_fixture(&[("label", "a"), ("frame_items", "true")]),
+        0,
+        client_id,
+    );
+    screen.wait_until("the shared slot was granted its permission", |renders| {
+        renders
+            .values()
+            .any(|rendered| field(rendered, "permissions") == "Granted")
+    });
+    let slot_id = *screen
+        .renders
+        .iter()
+        .find(|(_, rendered)| field(rendered, "permissions") == "Granted")
+        .map(|((slot_id, _), _)| slot_id)
+        .unwrap();
+    screen.wait_for(
+        "the slot places its frame items once it renders",
+        |screen| screen.frame_items_set_by.contains(&slot_id),
+    );
+    screen.frame_items_cleared_for.clear();
+    slot_id
+}
+
+#[test]
+#[ignore]
+pub fn a_crashed_shared_plugin_loses_its_frame_items() {
+    let (sender, mut screen, teardown, _temp_folder) = start();
+    let client_id = 1;
+    let _ = sender.send(PluginInstruction::AddClient(client_id));
+    let slot_id = shared_slot_with_frame_items(&sender, &mut screen, client_id);
+    pipe_to_slot(&sender, "panic", slot_id, client_id);
+    screen.wait_for("the slot's frame items are cleared", |screen| {
+        screen.frame_items_cleared_for.contains(&slot_id)
+    });
+    teardown();
+}
+
+#[test]
+#[ignore]
+pub fn a_shared_plugin_reloaded_by_url_loses_its_frame_items() {
+    let (sender, mut screen, teardown, _temp_folder) = start();
+    let client_id = 1;
+    let _ = sender.send(PluginInstruction::AddClient(client_id));
+    let slot_id = shared_slot_with_frame_items(&sender, &mut screen, client_id);
+    let _ = sender.send(PluginInstruction::Reload(
+        Some(false),
+        None,
+        shared_fixture(&[("label", "a"), ("frame_items", "true")]),
+        0,
+        Size { cols: 80, rows: 5 },
+        None,
+    ));
+    screen.wait_for("the slot's frame items are cleared", |screen| {
+        screen.frame_items_cleared_for.contains(&slot_id)
     });
     teardown();
 }

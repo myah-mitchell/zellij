@@ -377,6 +377,10 @@ enum MouseAction {
     FrameIntercepted {
         pane_id: PaneId,
     },
+    FrameItemClicked {
+        pane_id: PaneId,
+        button: MouseButton,
+    },
     OpenContextMenu {
         kind: ContextMenuKind,
         pane_id: PaneId,
@@ -416,6 +420,7 @@ struct ClickedPaneDetails {
     pane_id: PaneId,
     on_frame: bool,
     frame_intercepted: bool,
+    on_frame_item: bool,
     edge: Option<PaneEdge>,
     is_floating: bool,
     terminal_wants_mouse: bool,
@@ -914,6 +919,9 @@ impl MouseHandler {
         let frame_intercepted = on_frame
             && event.event_type == MouseEventType::Press
             && pane.position_is_on_pin_button(position, client_id);
+        let on_frame_item = on_frame
+            && event.event_type == MouseEventType::Press
+            && pane.frame_item_at(position, client_id).is_some();
         let is_unselectable_plugin = matches!(pane.pid(), PaneId::Plugin(_)) && !pane.selectable();
         let edge = if on_frame {
             pane.get_edge_at_position(position)
@@ -933,6 +941,7 @@ impl MouseHandler {
             pane_id,
             on_frame,
             frame_intercepted,
+            on_frame_item,
             edge,
             is_floating,
             terminal_wants_mouse,
@@ -1445,6 +1454,25 @@ impl MouseHandler {
                 }
                 tab.set_force_render();
                 Ok(MouseEffect::state_changed())
+            },
+            MouseAction::FrameItemClicked { pane_id, button } => {
+                let hit = tab
+                    .get_pane_with_id(pane_id)
+                    .and_then(|pane| pane.frame_item_at(&event.position, client_id));
+                if let Some(hit) = hit {
+                    let click = zellij_utils::data::FrameItemClick {
+                        pane_id: pane_id.into(),
+                        item_id: hit.item_id,
+                        button,
+                        modifiers: mouse_modifiers_of_event(event),
+                    };
+                    let _ = tab.senders.send_to_plugin(PluginInstruction::Update(vec![(
+                        Some(hit.plugin_id),
+                        Some(client_id),
+                        zellij_utils::data::Event::FrameItemClicked(click),
+                    )]));
+                }
+                Ok(MouseEffect::default())
             },
             MouseAction::OpenContextMenu {
                 kind,
@@ -2133,6 +2161,23 @@ impl MouseHandler {
         let Some(button) = button else {
             return Ok(MouseAction::NoAction);
         };
+
+        // a plugin's item on the frame takes the click before the frame's own handling (pin,
+        // resize, context menu), so the plugin decides what each button does
+        let is_frame_item_button = matches!(
+            button,
+            MouseButton::Left | MouseButton::Right | MouseButton::Middle
+        );
+        if is_frame_item_button && !event.alt {
+            if let Some(details) = ctx.clicked_pane.as_ref() {
+                if details.on_frame && details.on_frame_item {
+                    return Ok(MouseAction::FrameItemClicked {
+                        pane_id: details.pane_id,
+                        button,
+                    });
+                }
+            }
+        }
 
         if button == MouseButton::Left && !event.alt {
             if let Some(details) = ctx.clicked_pane.as_ref() {
@@ -3239,6 +3284,7 @@ mod tests {
             pane_id,
             on_frame: false,
             frame_intercepted: false,
+            on_frame_item: false,
             edge: None,
             is_floating: false,
             terminal_wants_mouse: false,
@@ -3501,6 +3547,81 @@ mod tests {
             .unwrap(),
             MouseAction::Ungroup
         );
+    }
+
+    fn clicked_on_frame_item(pane_id: PaneId) -> ClickedPaneDetails {
+        let mut details = clicked(pane_id);
+        details.on_frame = true;
+        details.on_frame_item = true;
+        details
+    }
+
+    #[test]
+    fn presses_on_a_frame_item_go_to_its_plugin_with_their_button() {
+        let position = Position::new(0, 4);
+        let context = context_with(clicked_on_frame_item(PaneId::Terminal(1)));
+        for (event, button) in [
+            (
+                MouseEvent::new_left_press_event(position),
+                MouseButton::Left,
+            ),
+            (
+                MouseEvent::new_right_press_event(position),
+                MouseButton::Right,
+            ),
+            (
+                MouseEvent::new_middle_press_event(position),
+                MouseButton::Middle,
+            ),
+            (
+                MouseEvent::new_left_press_with_ctrl_event(position),
+                MouseButton::Left,
+            ),
+        ] {
+            assert_eq!(
+                MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+                MouseAction::FrameItemClicked {
+                    pane_id: PaneId::Terminal(1),
+                    button,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_frame_item_press_wins_over_the_pin_button() {
+        let position = Position::new(0, 4);
+        let mut details = clicked_on_frame_item(PaneId::Plugin(2));
+        details.frame_intercepted = true;
+        let context = context_with(details);
+        assert_eq!(
+            MouseHandler::determine_mouse_action(
+                &MouseEvent::new_left_press_event(position),
+                &context
+            )
+            .unwrap(),
+            MouseAction::FrameItemClicked {
+                pane_id: PaneId::Plugin(2),
+                button: MouseButton::Left,
+            }
+        );
+    }
+
+    #[test]
+    fn alt_presses_and_wheel_events_on_a_frame_item_are_not_item_clicks() {
+        let position = Position::new(0, 4);
+        let context = context_with(clicked_on_frame_item(PaneId::Terminal(1)));
+        for event in [
+            MouseEvent::new_left_press_with_alt_event(position),
+            MouseEvent::new_right_press_with_alt_event(position),
+            MouseEvent::new_scroll_up_event(position),
+            MouseEvent::new_left_release_event(position),
+        ] {
+            assert!(!matches!(
+                MouseHandler::determine_mouse_action(&event, &context).unwrap(),
+                MouseAction::FrameItemClicked { .. }
+            ));
+        }
     }
 
     #[test]

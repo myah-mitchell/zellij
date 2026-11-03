@@ -44,6 +44,7 @@ pub struct PaneContentsAndUi<'a> {
     mouse_hover_tips: bool,
     dimmed_for_clients: HashSet<ClientId>,
     live_views: Option<crate::pane_mirror::SharedLiveViews>,
+    frame_items: Option<crate::ui::frame_items::SharedFrameItems>,
 }
 
 impl<'a> PaneContentsAndUi<'a> {
@@ -107,10 +108,14 @@ impl<'a> PaneContentsAndUi<'a> {
             mouse_hover_tips,
             dimmed_for_clients,
             live_views: None,
+            frame_items: None,
         }
     }
     pub fn set_live_views(&mut self, live_views: crate::pane_mirror::SharedLiveViews) {
         self.live_views = Some(live_views);
+    }
+    pub fn set_frame_items(&mut self, frame_items: crate::ui::frame_items::SharedFrameItems) {
+        self.frame_items = Some(frame_items);
     }
     fn render_live_view_for_client(
         &mut self,
@@ -408,6 +413,11 @@ impl<'a> PaneContentsAndUi<'a> {
         let frame_is_dimmed = self.frame_is_dimmed_for_client(client_id);
         let guest_choice_indicator = self.pane.guest_choice_indicator(client_id);
         let border_style = self.border_style(pane_is_floating);
+        let frame_item_groups = self
+            .frame_items
+            .as_ref()
+            .map(|frame_items| frame_items.borrow().groups_for_pane(self.pane.pid()))
+            .unwrap_or_default();
         let frame_params = if session_is_mirrored {
             FrameParams {
                 focused_client,
@@ -438,6 +448,7 @@ impl<'a> PaneContentsAndUi<'a> {
                 mouse_hover_tips: self.mouse_hover_tips,
                 dimmed: frame_is_dimmed,
                 guest_choice_indicator,
+                frame_item_groups,
             }
         } else {
             FrameParams {
@@ -472,6 +483,7 @@ impl<'a> PaneContentsAndUi<'a> {
                 mouse_hover_tips: self.mouse_hover_tips,
                 dimmed: frame_is_dimmed,
                 guest_choice_indicator,
+                frame_item_groups,
             }
         };
 

@@ -60,12 +60,10 @@ impl ZellijSharedPlugin for State {
         self.configuration = configuration;
         self.instance_id = get_plugin_ids().plugin_id;
         subscribe(&[EventType::Key]);
-        if self
-            .configuration
-            .get("settings_entries")
-            .map(|v| v == "true")
-            == Some(true)
-        {
+        let needs_permission = ["settings_entries", "frame_items"]
+            .iter()
+            .any(|key| self.configuration.get(*key).map(|v| v == "true") == Some(true));
+        if needs_permission {
             subscribe(&[EventType::PermissionRequestResult]);
             request_permission(&[PermissionType::ChangeApplicationState]);
         }
@@ -164,6 +162,12 @@ impl ZellijSharedPlugin for State {
             .is_some();
         if collapse {
             set_self_collapsed(true);
+        }
+        // self commands are only allowed while rendering, so frame items are placed here
+        let places_frame_items =
+            self.configuration.get("frame_items").map(|v| v == "true") == Some(true);
+        if places_frame_items && self.permission_result.as_deref() == Some("Granted") {
+            set_default_frame_items(vec![FrameItem::new("shared", "x").clickable()]);
         }
         print!("{}", render_line(self, rows, cols, slot_id, client_id));
     }
