@@ -53,6 +53,12 @@ stack = []
 tag = "fork-ea-v{version}-{date}"
 version = "0.46.7"
 base = "upstream:main"
-stack = ["feat/plugin-frame-items", "feat/show-pane-in-tab", "feat/plugin-middle-click"]
+stack = [
+  "feat/plugin-frame-items",
+  "feat/show-pane-in-tab",
+  "feat/plugin-middle-click",
+  "fix/merge-permission-grants",
+  "fix/plugin-click-after-tab-switch",
+]
 targets = ["linux-musl"]
 prerelease = true
