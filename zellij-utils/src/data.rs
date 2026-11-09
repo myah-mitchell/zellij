@@ -992,6 +992,8 @@ pub enum Mouse {
     Release(isize, usize),    // line and column
     Hover(isize, usize),      // line and column
     DoubleClick(isize, usize),
+    MiddleClick(isize, usize), // line and column
+    MiddleHold(isize, usize),  // line and column
 }
 
 impl Mouse {
@@ -1004,6 +1006,8 @@ impl Mouse {
             Mouse::Hold(line, column) => Some((*line as usize, *column as usize)),
             Mouse::Release(line, column) => Some((*line as usize, *column as usize)),
             Mouse::Hover(line, column) => Some((*line as usize, *column as usize)),
+            Mouse::MiddleClick(line, column) => Some((*line as usize, *column as usize)),
+            Mouse::MiddleHold(line, column) => Some((*line as usize, *column as usize)),
             _ => None,
         }
     }

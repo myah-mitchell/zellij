@@ -2208,6 +2208,8 @@ pub enum MouseEventName {
     MouseScrollLeft = 7,
     MouseScrollRight = 8,
     MouseDoubleClick = 9,
+    MouseMiddleClick = 10,
+    MouseMiddleHold = 11,
 }
 impl MouseEventName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2226,6 +2228,8 @@ impl MouseEventName {
             MouseEventName::MouseScrollLeft => "MouseScrollLeft",
             MouseEventName::MouseScrollRight => "MouseScrollRight",
             MouseEventName::MouseDoubleClick => "MouseDoubleClick",
+            MouseEventName::MouseMiddleClick => "MouseMiddleClick",
+            MouseEventName::MouseMiddleHold => "MouseMiddleHold",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2241,6 +2245,8 @@ impl MouseEventName {
             "MouseScrollLeft" => Some(Self::MouseScrollLeft),
             "MouseScrollRight" => Some(Self::MouseScrollRight),
             "MouseDoubleClick" => Some(Self::MouseDoubleClick),
+            "MouseMiddleClick" => Some(Self::MouseMiddleClick),
+            "MouseMiddleHold" => Some(Self::MouseMiddleHold),
             _ => None,
         }
     }

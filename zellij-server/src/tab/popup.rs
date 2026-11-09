@@ -217,10 +217,18 @@ fn mouse_event_for_plugin(event: &MouseEvent, line: isize, column: usize) -> Opt
     if event.wheel_down {
         return Some(Mouse::ScrollDown(wheel_lines));
     }
+    if event.wheel_left {
+        return Some(Mouse::ScrollLeft(wheel_lines));
+    }
+    if event.wheel_right {
+        return Some(Mouse::ScrollRight(wheel_lines));
+    }
     match event.event_type {
         MouseEventType::Press if event.left => Some(Mouse::LeftClick(line, column)),
         MouseEventType::Press if event.right => Some(Mouse::RightClick(line, column)),
+        MouseEventType::Press if event.middle => Some(Mouse::MiddleClick(line, column)),
         MouseEventType::Motion if event.left => Some(Mouse::Hold(line, column)),
+        MouseEventType::Motion if event.middle => Some(Mouse::MiddleHold(line, column)),
         MouseEventType::Motion if !event.right && !event.middle => Some(Mouse::Hover(line, column)),
         MouseEventType::Release => Some(Mouse::Release(line, column)),
         _ => None,
@@ -870,6 +878,10 @@ impl Tab {
             || self.pane_being_resized_with_mouse.is_some()
             || self.floating_panes.pane_is_being_moved_with_mouse()
             || !self.pane_drawings.is_empty()
+            || self
+                .mouse_press_owner
+                .values()
+                .any(|owner| matches!(owner, super::mouse_handler::MousePressOwner::Plugin(_)))
     }
     pub fn clear_hover_under_popups(&mut self, client_id: ClientId) -> bool {
         super::mouse_handler::clear_hover_for_client(self, client_id)
@@ -903,7 +915,7 @@ impl Tab {
         } else {
             (-1, 0)
         };
-        let is_wheel = event.wheel_up || event.wheel_down;
+        let is_wheel = event.wheel_up || event.wheel_down || event.wheel_left || event.wheel_right;
         if is_wheel && !inside {
             return Some(PopupMouseOutcome::Consumed);
         }
@@ -1065,6 +1077,59 @@ impl Tab {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_button_press_and_drag_reaches_a_popup_plugin_as_its_own_event() {
+        use zellij_utils::input::mouse::MouseEvent;
+        let position = Position::new(2, 3);
+        let events = [
+            MouseEvent::new_left_press_event(position),
+            MouseEvent::new_right_press_event(position),
+            MouseEvent::new_middle_press_event(position),
+            MouseEvent::new_left_motion_event(position),
+            MouseEvent::new_middle_motion_event(position),
+            MouseEvent::new_right_motion_event(position),
+            MouseEvent::new_middle_release_event(position),
+        ];
+        assert_eq!(
+            events.map(|event| mouse_event_for_plugin(&event, 1, 2)),
+            [
+                Some(Mouse::LeftClick(1, 2)),
+                Some(Mouse::RightClick(1, 2)),
+                Some(Mouse::MiddleClick(1, 2)),
+                Some(Mouse::Hold(1, 2)),
+                Some(Mouse::MiddleHold(1, 2)),
+                None,
+                Some(Mouse::Release(1, 2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_wheel_direction_reaches_a_popup_plugin() {
+        use zellij_utils::input::mouse::MouseEvent;
+        let position = Position::new(2, 3);
+        let lines = |event: &MouseEvent| {
+            super::super::mouse_handler::wheel_steps(
+                event,
+                super::super::mouse_handler::CLASSIC_WHEEL_LINES,
+            )
+            .0
+        };
+        let up = MouseEvent::new_scroll_up_event(position);
+        let down = MouseEvent::new_scroll_down_event(position);
+        let left = MouseEvent::new_scroll_left_event(position);
+        let right = MouseEvent::new_scroll_right_event(position);
+        assert_eq!(
+            [&up, &down, &left, &right].map(|event| mouse_event_for_plugin(event, 1, 2)),
+            [
+                Some(Mouse::ScrollUp(lines(&up))),
+                Some(Mouse::ScrollDown(lines(&down))),
+                Some(Mouse::ScrollLeft(lines(&left))),
+                Some(Mouse::ScrollRight(lines(&right))),
+            ]
+        );
+    }
 
     fn popup_in(corner: PopupCorner, rows: usize) -> (PopupPlacement, usize, usize) {
         (PopupPlacement::Corner(corner), 20, rows)
