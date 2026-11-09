@@ -1080,6 +1080,7 @@ message ShowPaneWithIdPayload {
   PaneId pane_id = 1;
   bool should_float_if_hidden = 2;
   bool should_focus_pane = 3;
+  optional uint64 tab_id = 4;
 }
 
 message NewTabsWithLayoutInfoPayload {
@@ -1678,6 +1679,10 @@ message HideFloatingPanesPayload {
 
 message ShowFloatingPanesPayload {
   optional uint32 tab_id = 1;
+}
+
+message ShowPaneWithIdResponse {
+  optional string error = 1;
 }
 
 message ShowFloatingPanesResponse {

@@ -816,6 +816,7 @@ pub enum ScreenInstruction {
     SuppressPane(PaneId, ClientId),
     UnsuppressPane(PaneId, bool), // bool -> should float if hidden
     UnsuppressOrExpandPane(PaneId, bool), // bool -> should float if hidden
+    MoveHiddenPaneToTab(PaneId, usize, Option<NotificationEnd>), // usize -> tab_id
     FocusPaneWithId(PaneId, bool, bool, ClientId, Option<NotificationEnd>), // bools:
     // should_float_if_hidden,
     // should_be_in_place_if_hidden
@@ -1512,6 +1513,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::SuppressPane(..) => ScreenContext::SuppressPane,
             ScreenInstruction::UnsuppressPane(..) => ScreenContext::UnsuppressPane,
             ScreenInstruction::UnsuppressOrExpandPane(..) => ScreenContext::UnsuppressOrExpandPane,
+            ScreenInstruction::MoveHiddenPaneToTab(..) => ScreenContext::MoveHiddenPaneToTab,
             ScreenInstruction::FocusPaneWithId(..) => ScreenContext::FocusPaneWithId,
             ScreenInstruction::RenamePane(..) => ScreenContext::RenamePane,
             ScreenInstruction::RenameActivePane(..) => ScreenContext::RenameActivePane,
@@ -9052,6 +9054,32 @@ impl Screen {
         self.render(None)?;
         Ok(())
     }
+    /// Moves a pane hidden on its own (eg. with `hide_pane_with_id`) into the tab with `tab_id`,
+    /// keeping it hidden, so that showing it next brings it up in that tab. Returns whether the
+    /// pane was moved: panes that are visible, hidden as part of their tab's layout, or already in
+    /// that tab stay where they are.
+    pub fn move_hidden_pane_to_tab(&mut self, pane_id: PaneId, tab_id: usize) -> bool {
+        if !self.tabs.contains_key(&tab_id) {
+            log::error!(
+                "Cannot move hidden pane {:?}, no tab with id: {}",
+                pane_id,
+                tab_id
+            );
+            return false;
+        }
+        let extracted_pane = self
+            .tabs
+            .iter_mut()
+            .filter(|(id, _)| **id != tab_id)
+            .find_map(|(_, tab)| tab.extract_pane_hidden_on_its_own(pane_id));
+        match (extracted_pane, self.tabs.get_mut(&tab_id)) {
+            (Some(pane), Some(target_tab)) => {
+                target_tab.insert_pane_hidden_on_its_own(pane);
+                true
+            },
+            _ => false,
+        }
+    }
     pub fn break_multiple_panes_to_tab_with_index(
         &mut self,
         pane_ids: Vec<PaneId>,
@@ -14445,6 +14473,18 @@ pub(crate) fn screen_thread_main(
                     }
                 }
                 screen.log_and_report_session_state()?;
+            },
+            ScreenInstruction::MoveHiddenPaneToTab(pane_id, tab_id, mut completion) => {
+                if screen.tabs.contains_key(&tab_id) {
+                    // the show that follows reports the session state
+                    screen.move_hidden_pane_to_tab(pane_id, tab_id);
+                    if let Some(c) = completion.as_mut() {
+                        c.set_exit_status(0);
+                    }
+                } else if let Some(c) = completion.as_mut() {
+                    c.set_exit_status(1);
+                    c.set_error_message("Tab not found".to_string());
+                }
             },
             ScreenInstruction::FocusPaneWithId(
                 pane_id,

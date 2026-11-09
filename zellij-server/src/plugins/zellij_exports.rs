@@ -114,8 +114,8 @@ use zellij_utils::{
             ProtobufOpenTerminalPaneInPlaceOfPaneIdResponse, ProtobufOpenTerminalResponse,
             ProtobufParseLayoutResponse, ProtobufPluginCommand, ProtobufReadConfigResponse,
             ProtobufRenameLayoutResponse, ProtobufSaveLayoutResponse, ProtobufSaveSessionResponse,
-            ProtobufShowFloatingPanesResponse, ProtobufSlotCommandResponse,
-            ProtobufWriteThemeFileResponse,
+            ProtobufShowFloatingPanesResponse, ProtobufShowPaneWithIdResponse,
+            ProtobufSlotCommandResponse, ProtobufWriteThemeFileResponse,
         },
         plugin_ids::{ProtobufPluginIds, ProtobufZellijVersion},
     },
@@ -1227,11 +1227,13 @@ fn host_run_plugin_command(mut caller: Caller<'_, PluginEnv>) {
                         pane_id,
                         should_float_if_hidden,
                         should_focus_pane,
+                        tab_id,
                     ) => show_pane_with_id(
                         env,
                         pane_id.into(),
                         should_float_if_hidden,
                         should_focus_pane,
+                        tab_id,
                     ),
                     PluginCommand::OpenCommandPaneBackground(command_to_run, context) => {
                         open_command_pane_background(env, command_to_run, context)
@@ -3489,7 +3491,39 @@ fn show_pane_with_id(
     pane_id: PaneId,
     should_float_if_hidden: bool,
     should_focus_pane: bool,
+    tab_id: Option<usize>,
 ) {
+    // the move has to finish first so the show below finds the pane in the target tab. Only calls
+    // with a tab id get a response: plugins built before it existed never read one
+    if let Some(tab_id) = tab_id {
+        let (completion_tx, completion_rx) = oneshot::channel();
+        let sent = env
+            .senders
+            .send_to_screen(ScreenInstruction::MoveHiddenPaneToTab(
+                pane_id,
+                tab_id,
+                Some(NotificationEnd::new(completion_tx)),
+            ));
+        let error = match sent {
+            Err(e) => Some(format!("{}", e)),
+            Ok(()) => {
+                let result = wait_for_action_completion(completion_rx, "show_pane_with_id", false);
+                match result.exit_status {
+                    Some(0) => None,
+                    _ => Some(
+                        result
+                            .error_message
+                            .unwrap_or_else(|| "Failed to move the pane".to_owned()),
+                    ),
+                }
+            },
+        };
+        if let Some(error) = error {
+            let response = ProtobufShowPaneWithIdResponse { error: Some(error) };
+            let _ = wasi_write_object(env, &response.encode_to_vec());
+            return;
+        }
+    }
     if should_focus_pane {
         let _ = env
             .senders
@@ -3507,6 +3541,10 @@ fn show_pane_with_id(
                 pane_id,
                 should_float_if_hidden,
             ));
+    }
+    if tab_id.is_some() {
+        let response = ProtobufShowPaneWithIdResponse { error: None };
+        let _ = wasi_write_object(env, &response.encode_to_vec());
     }
 }
 

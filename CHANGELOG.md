@@ -52,6 +52,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * feat: separate font families for bold, italic and bold italic text in the terminal window (`font_bold`, `font_italic`, `font_bold_italic`), and pick a family's normal width over its wider cuts (https://github.com/zellij-org/zellij/pull/5829)
 * feat: install Zellij.app on macOS from the setup screen, with the login shell environment, notifications and reopening from Finder; the setup screen can also copy Zellij to ~/.local/bin (https://github.com/zellij-org/zellij/pull/5830)
 * feat: plugins can add clickable items to pane frames
+* (BREAKING CHANGE zellij-tile) `show_pane_with_id` takes a `tab_id` to show a hidden pane in that tab, and returns a `Result`
+    * Migration help: add `None` as the last argument to keep the current behavior; with `None` the result is always `Ok(())`
 
 
 ## [0.45.1] - 2026-08-28

@@ -1387,6 +1387,8 @@ pub struct ShowPaneWithIdPayload {
     pub should_float_if_hidden: bool,
     #[prost(bool, tag="3")]
     pub should_focus_pane: bool,
+    #[prost(uint64, optional, tag="4")]
+    pub tab_id: ::core::option::Option<u64>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2427,6 +2429,12 @@ pub struct HideFloatingPanesPayload {
 pub struct ShowFloatingPanesPayload {
     #[prost(uint32, optional, tag="1")]
     pub tab_id: ::core::option::Option<u32>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShowPaneWithIdResponse {
+    #[prost(string, optional, tag="1")]
+    pub error: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

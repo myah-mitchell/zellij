@@ -391,6 +391,7 @@ pub enum ScreenContext {
     SuppressPane,
     UnsuppressPane,
     UnsuppressOrExpandPane,
+    MoveHiddenPaneToTab,
     FocusPaneWithId,
     RenamePane,
     RenameActivePane,
