@@ -55,6 +55,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * (BREAKING CHANGE zellij-tile) `show_pane_with_id` takes a `tab_id` to show a hidden pane in that tab, and returns a `Result`
     * Migration help: add `None` as the last argument to keep the current behavior; with `None` the result is always `Ok(())`
 * feat: plugins receive middle clicks and middle-button drags, and horizontal scroll in popups
+* fix: write the plugin permission cache atomically (https://github.com/zellij-org/zellij/pull/5841)
+* fix: keep earlier plugin permission grants (https://github.com/zellij-org/zellij/pull/5843)
 
 
 ## [0.45.1] - 2026-08-28
