@@ -10,7 +10,7 @@ pub struct EventNameList {
 pub struct Event {
     #[prost(enumeration="EventType", tag="1")]
     pub name: i32,
-    #[prost(oneof="event::Payload", tags="2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 63, 64")]
+    #[prost(oneof="event::Payload", tags="2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 63, 64, 65")]
     pub payload: ::core::option::Option<event::Payload>,
 }
 /// Nested message and enum types in `Event`.
@@ -140,6 +140,8 @@ pub mod event {
         LiveViewStateChangedPayload(super::LiveViewStateChangedPayload),
         #[prost(message, tag="64")]
         PluginSettingsEntriesPayload(super::PluginSettingsEntriesPayload),
+        #[prost(message, tag="65")]
+        FrameItemClickedPayload(super::FrameItemClickedPayload),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1595,6 +1597,28 @@ pub struct LiveViewStateChangedPayload {
     #[prost(string, tag="9")]
     pub release_key: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FrameItem {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub text: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub is_clickable: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FrameItemClickedPayload {
+    #[prost(message, optional, tag="1")]
+    pub pane_id: ::core::option::Option<PaneId>,
+    #[prost(string, tag="2")]
+    pub item_id: ::prost::alloc::string::String,
+    #[prost(enumeration="FrameItemMouseButton", tag="3")]
+    pub button: i32,
+    #[prost(enumeration="super::key::key::KeyModifier", repeated, tag="4")]
+    pub modifiers: ::prost::alloc::vec::Vec<i32>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum EventType {
@@ -1683,6 +1707,8 @@ pub enum EventType {
     DesktopIntegration = 69,
     LiveViewStateChanged = 71,
     PluginSettingsEntries = 72,
+    /// / A clickable frame item this plugin placed on a pane frame was clicked
+    FrameItemClicked = 73,
 }
 impl EventType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1761,6 +1787,7 @@ impl EventType {
             EventType::DesktopIntegration => "DesktopIntegration",
             EventType::LiveViewStateChanged => "LiveViewStateChanged",
             EventType::PluginSettingsEntries => "PluginSettingsEntries",
+            EventType::FrameItemClicked => "FrameItemClicked",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1836,6 +1863,7 @@ impl EventType {
             "DesktopIntegration" => Some(Self::DesktopIntegration),
             "LiveViewStateChanged" => Some(Self::LiveViewStateChanged),
             "PluginSettingsEntries" => Some(Self::PluginSettingsEntries),
+            "FrameItemClicked" => Some(Self::FrameItemClicked),
             _ => None,
         }
     }
@@ -2420,6 +2448,35 @@ impl LiveViewRelease {
             "LiveViewReleasePlugin" => Some(Self::Plugin),
             "LiveViewReleaseCleared" => Some(Self::Cleared),
             "LiveViewReleaseNotAllowed" => Some(Self::NotAllowed),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FrameItemMouseButton {
+    Left = 0,
+    Right = 1,
+    Middle = 2,
+}
+impl FrameItemMouseButton {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            FrameItemMouseButton::Left => "FrameItemMouseButtonLeft",
+            FrameItemMouseButton::Right => "FrameItemMouseButtonRight",
+            FrameItemMouseButton::Middle => "FrameItemMouseButtonMiddle",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "FrameItemMouseButtonLeft" => Some(Self::Left),
+            "FrameItemMouseButtonRight" => Some(Self::Right),
+            "FrameItemMouseButtonMiddle" => Some(Self::Middle),
             _ => None,
         }
     }

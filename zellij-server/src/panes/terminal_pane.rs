@@ -1456,6 +1456,15 @@ impl Pane for TerminalPane {
         }
         false
     }
+    fn frame_item_at(
+        &self,
+        position: &Position,
+        client_id: ClientId,
+    ) -> Option<crate::ui::pane_boundaries_frame::FrameItemHit> {
+        self.frame
+            .get(&client_id)
+            .and_then(|client_frame| client_frame.frame_item_at(position))
+    }
     fn intercept_mouse_event_on_frame(&mut self, event: &MouseEvent, client_id: ClientId) -> bool {
         if self.position_is_on_frame(&event.position) {
             let relative_position = self.relative_position(&event.position);

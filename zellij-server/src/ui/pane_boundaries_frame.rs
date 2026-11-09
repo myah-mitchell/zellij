@@ -5,6 +5,7 @@ use crate::panes::{
 use crate::tab::GuestChoiceIndicator;
 use crate::ui::border_glyphs::{self, Corner};
 use crate::ui::boundaries::boundary_type;
+use crate::ui::frame_items::FrameItemGroup;
 use crate::ui::hint_text::{
     exit_code_segments, hover_segments, rerun_segments, resize_segments, HintExitStatus, HintLevel,
     HintSegment, HintTier,
@@ -15,6 +16,7 @@ use zellij_utils::errors::prelude::*;
 use zellij_utils::pane_size::{Offset, PaneGeom, Viewport};
 use zellij_utils::position::Position;
 
+use std::cell::RefCell;
 use unicode_width::UnicodeWidthStr;
 use zellij_utils::graphemes;
 
@@ -136,6 +138,55 @@ pub struct FrameParams {
     pub mouse_hover_tips: bool,
     pub dimmed: bool,
     pub guest_choice_indicator: Option<GuestChoiceIndicator>,
+    pub frame_item_groups: Vec<FrameItemGroup>,
+}
+
+/// A clickable frame item a plugin placed, as found under the mouse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrameItemHit {
+    pub plugin_id: u32,
+    pub item_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct FrameItemRegion {
+    start: usize,
+    len: usize,
+    hit: FrameItemHit,
+}
+
+// Where the clickable items ended up the last time the frame rendered: `pending` holds offsets
+// within the right side of the title while it's being composed, and `placed` holds absolute
+// columns once a title line actually draws that right side. The regions follow from the other
+// fields, so they never make two frames unequal.
+#[derive(Debug, Default)]
+struct FrameItemRegions {
+    pending: RefCell<Vec<FrameItemRegion>>,
+    placed: RefCell<Vec<FrameItemRegion>>,
+}
+
+impl PartialEq for FrameItemRegions {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl FrameItemRegions {
+    fn clear(&self) {
+        self.pending.borrow_mut().clear();
+        self.placed.borrow_mut().clear();
+    }
+    fn place_at(&self, right_side_start_column: usize) {
+        *self.placed.borrow_mut() = self
+            .pending
+            .borrow()
+            .iter()
+            .map(|region| FrameItemRegion {
+                start: right_side_start_column + region.start,
+                ..region.clone()
+            })
+            .collect();
+    }
 }
 
 #[derive(Default, PartialEq)]
@@ -172,6 +223,8 @@ pub struct PaneFrame {
     dimmed: bool,
     guest_choice_indicator: Option<GuestChoiceIndicator>,
     attention_marker: Option<FrameAttentionMarker>,
+    frame_item_groups: Vec<FrameItemGroup>,
+    frame_item_regions: FrameItemRegions,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,6 +274,8 @@ impl PaneFrame {
             dimmed: frame_params.dimmed,
             guest_choice_indicator: frame_params.guest_choice_indicator,
             attention_marker: None,
+            frame_item_groups: frame_params.frame_item_groups,
+            frame_item_regions: FrameItemRegions::default(),
         }
     }
     pub fn omits_title(&self) -> bool {
@@ -312,7 +367,77 @@ impl PaneFrame {
         &self,
         max_length: usize,
     ) -> Option<(Vec<TerminalCharacter>, usize)> {
-        self.render_title_right_side_inner(max_length)
+        let built_in = self.render_title_right_side_inner(max_length);
+        if self.frame_item_groups.is_empty() {
+            return built_in;
+        }
+        // plugin items go before the built-in indications so those keep their place at the
+        // right edge (where the pin checkbox is clicked), and get only the room those leave
+        let built_in_len = built_in.as_ref().map(|(_, len)| *len).unwrap_or(0);
+        let available = max_length.saturating_sub(built_in_len);
+        let mut characters = vec![];
+        let mut len = 0;
+        // the "|" before the built-in indications is only drawn once some group is shown
+        let built_in_separator_len = usize::from(built_in.is_some());
+        let mut regions = self.frame_item_regions.pending.borrow_mut();
+        for group in &self.frame_item_groups {
+            let group_len: usize = group
+                .items
+                .iter()
+                .map(|item| graphemes::display_width(&item.text))
+                .sum();
+            let separator_len = usize::from(len > 0);
+            if group_len == 0
+                || len + separator_len + group_len + built_in_separator_len > available
+            {
+                // a group is shown whole or not at all
+                continue;
+            }
+            if len > 0 {
+                characters.append(&mut foreground_color("|", self.color));
+                len += 1;
+            }
+            for item in &group.items {
+                let item_len = graphemes::display_width(&item.text);
+                if item.is_clickable {
+                    regions.push(FrameItemRegion {
+                        start: len,
+                        len: item_len,
+                        hit: FrameItemHit {
+                            plugin_id: group.plugin_id,
+                            item_id: item.id.clone(),
+                        },
+                    });
+                }
+                characters.append(&mut foreground_color(&item.text, self.color));
+                len += item_len;
+            }
+        }
+        match built_in {
+            Some((mut built_in, built_in_len)) => {
+                if len > 0 {
+                    characters.append(&mut foreground_color("|", self.color));
+                    len += 1;
+                }
+                characters.append(&mut built_in);
+                Some((characters, len + built_in_len))
+            },
+            None if len > 0 => Some((characters, len)),
+            None => None,
+        }
+    }
+    /// The clickable frame item at this absolute position, if the last render placed one there.
+    pub fn frame_item_at(&self, position: &Position) -> Option<FrameItemHit> {
+        if position.line() != self.geom.y as isize {
+            return None;
+        }
+        let column = position.column();
+        self.frame_item_regions
+            .placed
+            .borrow()
+            .iter()
+            .find(|region| column >= region.start && column < region.start + region.len)
+            .map(|region| region.hit.clone())
     }
     fn render_title_right_side_inner(
         &self,
@@ -637,6 +762,7 @@ impl PaneFrame {
         let middle_start_position = self.geom.x + (total_title_length / 2) - (middle_len / 2) + 1;
         let right_side_start_position =
             (self.geom.x + self.geom.cols - 1).saturating_sub(*right_side_len);
+        self.frame_item_regions.place_at(right_side_start_position);
 
         let mut col = self.geom.x;
         loop {
@@ -765,6 +891,8 @@ impl PaneFrame {
         for _ in (left_side_len + right_side_len)..total_title_length {
             middle.push_str(self.top_horizontal());
         }
+        self.frame_item_regions
+            .place_at((self.geom.x + self.geom.cols - 1).saturating_sub(*right_side_len));
         let mut ret = vec![];
         ret.append(&mut left_boundary);
         ret.append(&mut left_side);
@@ -1429,6 +1557,7 @@ impl PaneFrame {
     pub fn render(&self) -> Result<(Vec<CharacterChunk>, Option<String>)> {
         let err_context = || "failed to render pane frame";
         let mut character_chunks = vec![];
+        self.frame_item_regions.clear();
         if self.omit_title {
             return Ok((character_chunks, None));
         }
@@ -1645,6 +1774,7 @@ mod tests {
                 mouse_hover_tips: true,
                 dimmed: false,
                 guest_choice_indicator: None,
+                frame_item_groups: vec![],
             },
         )
     }
@@ -1995,5 +2125,148 @@ mod tests {
         let text = characters_to_string(&chars);
         assert!(!text.contains("MouseScroll"));
         assert!(text.contains("<drag borders>"));
+    }
+
+    fn frame_with_items(cols: usize, groups: Vec<FrameItemGroup>) -> PaneFrame {
+        let mut frame = title_frame("Pane", cols, true);
+        frame.geom.x = 5;
+        frame.geom.y = 2;
+        frame.frame_item_groups = groups;
+        frame
+    }
+
+    fn top_row_text(frame: &PaneFrame) -> String {
+        let (chunks, _) = frame.render().unwrap();
+        let mut row: Vec<&CharacterChunk> = chunks.iter().filter(|c| c.y == frame.geom.y).collect();
+        row.sort_by_key(|c| c.x);
+        row.iter()
+            .map(|c| characters_to_string(&c.terminal_characters))
+            .collect()
+    }
+
+    fn window_buttons() -> FrameItemGroup {
+        FrameItemGroup {
+            plugin_id: 1,
+            items: vec![
+                zellij_utils::data::FrameItem::new("minimize", "[-]").clickable(),
+                zellij_utils::data::FrameItem::new("close", "[X]").clickable(),
+            ],
+        }
+    }
+
+    fn item_at(frame: &PaneFrame, line: i32, column: u16) -> Option<String> {
+        frame
+            .frame_item_at(&Position::new(line, column))
+            .map(|hit| hit.item_id)
+    }
+
+    #[test]
+    fn frame_items_sit_flush_right_on_a_tiled_pane() {
+        let frame = frame_with_items(40, vec![window_buttons()]);
+        let text = top_row_text(&frame);
+        let without_corner: String = {
+            let mut chars: Vec<char> = text.chars().collect();
+            chars.pop();
+            chars.into_iter().collect()
+        };
+        assert!(without_corner.ends_with("[-][X]"), "{:?}", text);
+        // the right side ends just before the corner, at column 5 + 40 - 2
+        assert_eq!(item_at(&frame, 2, 38), Some("minimize".to_owned()));
+        assert_eq!(item_at(&frame, 2, 40), Some("minimize".to_owned()));
+        assert_eq!(item_at(&frame, 2, 41), Some("close".to_owned()));
+        assert_eq!(item_at(&frame, 2, 43), Some("close".to_owned()));
+        assert_eq!(item_at(&frame, 2, 37), None);
+        assert_eq!(item_at(&frame, 2, 44), None);
+        assert_eq!(item_at(&frame, 3, 39), None);
+    }
+
+    #[test]
+    fn several_groups_next_to_the_pin_checkbox_stay_within_the_room_given() {
+        let group = |plugin_id, text| FrameItemGroup {
+            plugin_id,
+            items: vec![zellij_utils::data::FrameItem::new("item", text)],
+        };
+        let mut frame = frame_with_items(40, vec![group(1, "aa"), group(2, "bb")]);
+        frame.is_floating = true;
+        // "aa|bb| PIN [ ] " needs 15 columns
+        for max_length in 9..20 {
+            let (characters, len) = frame.render_title_right_side(max_length).unwrap();
+            assert!(len <= max_length, "{} > {}", len, max_length);
+            assert_eq!(characters.len(), len);
+        }
+        let (_, len) = frame.render_title_right_side(14).unwrap();
+        assert_eq!(len, "aa| PIN [ ] ".len());
+    }
+
+    #[test]
+    fn frame_items_leave_the_pin_checkbox_where_it_is() {
+        let mut frame = frame_with_items(40, vec![window_buttons()]);
+        frame.is_floating = true;
+        let text = top_row_text(&frame);
+        assert!(text.contains("[-][X]| PIN [ ] "), "{:?}", text);
+        let mut frame_without_items = frame_with_items(40, vec![]);
+        frame_without_items.is_floating = true;
+        let pin_column = |text: &str| text.chars().position(|c| c == 'P').unwrap();
+        assert_eq!(
+            pin_column(&text),
+            pin_column(&top_row_text(&frame_without_items))
+        );
+        // " PIN [ ] " takes the 9 columns before the corner at 44, "|" is at 34
+        assert_eq!(item_at(&frame, 2, 28), Some("minimize".to_owned()));
+        assert_eq!(item_at(&frame, 2, 33), Some("close".to_owned()));
+        assert_eq!(item_at(&frame, 2, 34), None);
+        assert!(frame.clicked_on_pinned(Position::new(-1, 35)));
+    }
+
+    #[test]
+    fn a_group_that_does_not_fit_is_left_out_whole() {
+        let too_wide = FrameItemGroup {
+            plugin_id: 1,
+            items: vec![
+                zellij_utils::data::FrameItem::new("a", "xxxxxx").clickable(),
+                zellij_utils::data::FrameItem::new("b", "yyyyyy").clickable(),
+            ],
+        };
+        let narrow = FrameItemGroup {
+            plugin_id: 2,
+            items: vec![zellij_utils::data::FrameItem::new("c", "ccc").clickable()],
+        };
+        let frame = frame_with_items(20, vec![too_wide, narrow]);
+        let text = top_row_text(&frame);
+        assert!(!text.contains('x') && !text.contains('y'), "{:?}", text);
+        assert!(text.contains("ccc"), "{:?}", text);
+        assert_eq!(item_at(&frame, 2, 22), Some("c".to_owned()));
+    }
+
+    #[test]
+    fn groups_are_separated_and_only_clickable_items_can_be_clicked() {
+        let status = FrameItemGroup {
+            plugin_id: 2,
+            items: vec![zellij_utils::data::FrameItem::new("status", "ok")],
+        };
+        let frame = frame_with_items(40, vec![window_buttons(), status]);
+        let text = top_row_text(&frame);
+        assert!(text.contains("[-][X]|ok"), "{:?}", text);
+        assert_eq!(item_at(&frame, 2, 42), None);
+        assert_eq!(item_at(&frame, 2, 43), None);
+        assert_eq!(item_at(&frame, 2, 38), Some("close".to_owned()));
+    }
+
+    #[test]
+    fn nothing_can_be_clicked_when_there_is_no_room_for_the_right_side() {
+        let frame = frame_with_items(8, vec![window_buttons()]);
+        let text = top_row_text(&frame);
+        assert!(!text.contains("[X]"), "{:?}", text);
+        for column in 0..20 {
+            assert_eq!(item_at(&frame, 2, column), None);
+        }
+    }
+
+    #[test]
+    fn where_items_were_placed_does_not_make_frames_unequal() {
+        let rendered = frame_with_items(40, vec![window_buttons()]);
+        top_row_text(&rendered);
+        assert!(rendered == frame_with_items(40, vec![window_buttons()]));
+        assert!(rendered != frame_with_items(40, vec![]));
     }
 }
